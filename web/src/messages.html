@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>과제 알리미 - 메세지</title>
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+  <header class="app-header">
+    <h1 onclick="location.href='calendar.html'">과제 알리미</h1>
+    <nav>
+      <a href="calendar.html">날짜화면</a>
+      <a href="register.html">과제등록</a>
+      <a href="messages.html" class="active">메세지</a>
+      <a href="settings.html">설정</a>
+    </nav>
+    <div class="user-info">
+      <span class="user-name" id="userName"></span>
+      <button class="logout-btn" onclick="API.logout()">로그아웃</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="stats" style="margin-bottom:15px">
+      <div class="stat-card urgent" id="showGradeMsg" style="cursor:pointer"><div class="num">📢</div><div class="label">학년 메세지</div></div>
+      <div class="stat-card normal" id="showClassMsg" style="cursor:pointer"><div class="num">💬</div><div class="label">반 메세지</div></div>
+    </div>
+
+    <div class="card">
+      <h3 id="messageTitle">전체 메세지</h3>
+
+      <div class="message-form">
+        <select id="msgType" style="padding:10px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem">
+          <option value="grade">학년 공지</option>
+          <option value="class">반 알림장</option>
+        </select>
+        <textarea id="msgContent" placeholder="메세지를 입력하세요..." rows="2"></textarea>
+        <button class="btn btn-primary btn-sm" id="sendMsgBtn">보내기</button>
+      </div>
+
+      <div id="messageList"><div class="empty-state">메세지가 없습니다.</div></div>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=2"></script>
+  <script>
+    let filterType = null;
+    let messages = [];
+
+    API.requireAuth();
+
+    async function init() {
+      const serverUser = await API.me();
+      if (serverUser && serverUser.user_id) {
+        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number });
+      }
+      await API.loadUserInfo();
+      await loadMessages();
+    }
+
+    async function loadMessages() {
+      const user = API.getUser();
+      if (!user) return;
+      const data = await API.getMessages(user.grade, user.class_number);
+      if (data) messages = data;
+      renderMessages();
+    }
+
+    function renderMessages() {
+      let filtered = messages;
+      if (filterType === 'grade') filtered = messages.filter(m => m.type === 'grade');
+      else if (filterType === 'class') filtered = messages.filter(m => m.type === 'class');
+
+      const user = API.getUser();
+      document.getElementById('messageTitle').textContent =
+        filterType === 'grade' ? `📢 학년 메세지${user ? ' (' + user.grade + '학년)' : ''}` :
+        filterType === 'class' ? `💬 반 메세지${user ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}` :
+        '전체 메세지';
+
+      const container = document.getElementById('messageList');
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">메세지가 없습니다.</div>';
+        return;
+      }
+      container.innerHTML = filtered.map(m => {
+        const badge = m.type === 'grade' ? '<span class="msg-badge grade">학년</span>' : '<span class="msg-badge class">반</span>';
+        const time = new Date(m.created_at).toLocaleString('ko-KR');
+        return `<div class="message-item">
+          <div class="msg-header">
+            <span class="msg-sender">${m.sender_name} ${badge}</span>
+            <span class="msg-time">${time}</span>
+          </div>
+          <div class="msg-content">${m.content}</div>
+        </div>`;
+      }).join('');
+    }
+
+    document.getElementById('sendMsgBtn').addEventListener('click', async () => {
+      const content = document.getElementById('msgContent').value.trim();
+      const type = document.getElementById('msgType').value;
+      const user = API.getUser();
+      if (!content) { alert('내용을 입력해주세요.'); return; }
+      if (!user) { alert('로그인이 필요합니다.'); return; }
+
+      const data = { content, type, target_grade: user.grade };
+      if (type === 'class') data.target_class = user.class_number;
+
+      const res = await API.sendMessage(data);
+      if (res && res.success) {
+        document.getElementById('msgContent').value = '';
+        loadMessages();
+      } else {
+        alert('전송에 실패했습니다.');
+      }
+    });
+
+    document.getElementById('showGradeMsg').addEventListener('click', () => {
+      filterType = filterType === 'grade' ? null : 'grade';
+      renderMessages();
+    });
+
+    document.getElementById('showClassMsg').addEventListener('click', () => {
+      filterType = filterType === 'class' ? null : 'class';
+      renderMessages();
+    });
+
+    init();
+  </script>
+</body>
+</html>

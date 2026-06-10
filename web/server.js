@@ -1,0 +1,258 @@
+const express = require('express');
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const path = require('path');
+
+const app = express();
+const PORT = 80;
+const JWT_SECRET = 'assignment-alarm-secret-key-2024';
+
+const pool = mysql.createPool({
+  host: 'mysql',
+  user: 'user',
+  password: 'userpassword',
+  database: 'assignment_alarm',
+  waitForConnections: true,
+  connectionLimit: 10,
+  charset: 'utf8mb4'
+});
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'src')));
+
+function authMiddleware(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  try {
+    req.user = jwt.verify(auth.split(' ')[1], JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: '토큰이 만료되었습니다.' });
+  }
+}
+
+// Auth
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { email, password, name, grade, class_number } = req.body;
+    if (!email || !password || !name || !grade || !class_number) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
+    const hash = await bcrypt.hash(password, 10);
+    const [result] = await pool.execute('INSERT INTO users (email, password, name, grade, class_number) VALUES (?, ?, ?, ?, ?)', [email, hash, name, grade, class_number]);
+    const token = jwt.sign({ id: result.insertId, email, name, grade, class_number }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: result.insertId, email, name, grade, class_number } });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 가입된 이메일입니다.' });
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: '이메일과 비밀번호를 입력해주세요.' });
+    const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    if (rows.length === 0) return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
+    const user = rows[0];
+    if (!await bcrypt.compare(password, user.password)) return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
+    const token = jwt.sign({ id: user.user_id, email: user.email, name: user.name, grade: user.grade, class_number: user.class_number }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.user_id, email: user.email, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled } });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    res.json(rows[0]);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// Users
+app.get('/api/users/:id', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    res.json(rows[0]);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.put('/api/users/:id', authMiddleware, async (req, res) => {
+  try {
+    const allowed = ['name', 'profile_image_url', 'is_alarm_enabled'];
+    const updates = [];
+    const values = [];
+    for (const field of allowed) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        values.push(req.body[field]);
+      }
+    }
+    if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
+    values.push(req.params.id);
+    await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`, values);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// Assignments
+app.get('/api/assignments', authMiddleware, async (req, res) => {
+  try {
+    const { grade, class: cls } = req.query;
+    let sql = 'SELECT a.*, u.name AS creator_name FROM assignments a JOIN users u ON a.created_by = u.user_id WHERE 1=1';
+    const params = [];
+    if (grade) { sql += ' AND a.target_grade = ?'; params.push(grade); }
+    if (cls) { sql += ' AND (a.target_class = ? OR a.target_class IS NULL)'; params.push(cls); }
+    sql += ' ORDER BY a.due_date ASC';
+    const [rows] = await pool.execute(sql, params);
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.post('/api/assignments', authMiddleware, async (req, res) => {
+  try {
+    const { title, content, due_date, target_grade, target_class } = req.body;
+    if (!title || !due_date || !target_grade) return res.status(400).json({ error: '과제명, 마감일, 대상 학년은 필수입니다.' });
+    const [result] = await pool.execute('INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)', [title, content || null, due_date, target_grade, target_class || null, req.user.id]);
+    const assignmentId = result.insertId;
+    const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND (class_number = ? OR ? IS NULL)', [target_grade, target_class || '', target_class || null]);
+    for (const s of students) {
+      await pool.execute('INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)', [s.user_id, assignmentId]);
+    }
+    res.json({ assignment_id: assignmentId, success: true });
+  } catch (e) {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
+  try {
+    const { title, content, due_date, target_grade, target_class } = req.body;
+    const updates = [];
+    const values = [];
+    if (title !== undefined) { updates.push('title = ?'); values.push(title); }
+    if (content !== undefined) { updates.push('content = ?'); values.push(content); }
+    if (due_date !== undefined) { updates.push('due_date = ?'); values.push(due_date); }
+    if (target_grade !== undefined) { updates.push('target_grade = ?'); values.push(target_grade); }
+    if (target_class !== undefined) { updates.push('target_class = ?'); values.push(target_class); }
+    if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
+    values.push(req.params.id);
+    await pool.execute(`UPDATE assignments SET ${updates.join(', ')} WHERE assignment_id = ?`, values);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.delete('/api/assignments/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.execute('DELETE FROM assignments WHERE assignment_id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// User Assignments (completion status)
+app.get('/api/user-assignments/:userId', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM user_assignments WHERE user_id = ?', [req.params.userId]);
+    const map = {};
+    rows.forEach(r => { map[r.assignment_id] = r.is_completed; });
+    res.json(map);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.put('/api/user-assignments', authMiddleware, async (req, res) => {
+  try {
+    const { assignment_id, is_completed } = req.body;
+    await pool.execute('INSERT INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_completed = ?', [req.user.id, assignment_id, is_completed ? 1 : 0, is_completed ? 1 : 0]);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.get('/api/users/:userId/assignments', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const { grade, class: cls } = req.query;
+    let sql = 'SELECT a.*, u.name AS creator_name, COALESCE(ua.is_completed, 0) AS is_completed FROM assignments a JOIN users u ON a.created_by = u.user_id LEFT JOIN user_assignments ua ON a.assignment_id = ua.assignment_id AND ua.user_id = ? WHERE (a.target_grade = (SELECT grade FROM users WHERE user_id = ?) OR a.target_grade IS NULL)';
+    const params = [userId, userId];
+    if (grade) { sql += ' AND a.target_grade = ?'; params.push(grade); }
+    if (cls) { sql += ' AND (a.target_class = ? OR a.target_class IS NULL)'; params.push(cls); }
+    sql += ' ORDER BY a.due_date ASC';
+    const [rows] = await pool.execute(sql, params);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// Messages
+app.get('/api/messages', authMiddleware, async (req, res) => {
+  try {
+    const { grade, class: cls, type } = req.query;
+    let sql = 'SELECT m.*, u.name AS sender_name FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE 1=1';
+    const params = [];
+    if (grade) { sql += ' AND m.target_grade = ?'; params.push(grade); }
+    if (cls) { sql += ' AND (m.target_class = ? OR (m.type = ? AND m.target_class IS NULL))'; params.push(cls, 'grade'); }
+    if (type) { sql += ' AND m.type = ?'; params.push(type); }
+    sql += ' ORDER BY m.created_at DESC';
+    const [rows] = await pool.execute(sql, params);
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.post('/api/messages', authMiddleware, async (req, res) => {
+  try {
+    const { content, type, target_grade, target_class } = req.body;
+    if (!content || !type || !target_grade) return res.status(400).json({ error: '내용, 유형, 대상 학년은 필수입니다.' });
+    const [result] = await pool.execute('INSERT INTO messages (sender_id, content, type, target_grade, target_class) VALUES (?, ?, ?, ?, ?)', [req.user.id, content, type, target_grade, target_class || null]);
+    res.json({ message_id: result.insertId, success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// Serve frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'src', 'login.html'));
+});
+
+async function init() {
+  let retries = 30;
+  while (retries > 0) {
+    try {
+      const conn = await pool.getConnection();
+      await conn.ping();
+      conn.release();
+      console.log('MySQL connected');
+      app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+      return;
+    } catch {
+      retries--;
+      console.log(`Waiting for MySQL... (${retries} retries left)`);
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  console.error('Failed to connect to MySQL');
+  process.exit(1);
+}
+
+init();

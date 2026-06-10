@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>과제 알리미 - 로그인</title>
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body class="login-page">
+  <div class="auth-page">
+    <div class="auth-box">
+      <h1>과제 알리미</h1>
+      <p>과제를 놓치지 말고 확인하세요!</p>
+
+      <div class="auth-error" id="authError"></div>
+
+      <div id="loginForm">
+        <div class="form-group">
+          <label>이메일</label>
+          <input type="email" id="loginEmail" placeholder="email@example.com">
+        </div>
+        <div class="form-group">
+          <label>비밀번호</label>
+          <input type="password" id="loginPassword" placeholder="비밀번호">
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="loginBtn">로그인</button>
+        <div class="auth-link">계정이 없으신가요? <a id="goToRegister">회원가입</a></div>
+      </div>
+
+      <div id="registerForm" style="display:none">
+        <div class="form-group">
+          <label>이메일</label>
+          <input type="email" id="regEmail" placeholder="email@example.com">
+        </div>
+        <div class="form-group">
+          <label>비밀번호</label>
+          <input type="password" id="regPassword" placeholder="비밀번호">
+        </div>
+        <div class="form-group">
+          <label>이름</label>
+          <input type="text" id="regName" placeholder="이름">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>학년</label>
+            <select id="regGrade">
+              <option value="1">1학년</option>
+              <option value="2">2학년</option>
+              <option value="3">3학년</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>반</label>
+            <select id="regClass">
+              <option value="1">1반</option>
+              <option value="2">2반</option>
+              <option value="3">3반</option>
+              <option value="4">4반</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="registerBtn">회원가입</button>
+        <div class="auth-link">이미 계정이 있으신가요? <a id="goToLogin">로그인</a></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=2"></script>
+  <script>
+    function showError(msg) {
+      const el = document.getElementById('authError');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('authError').style.display = 'none';
+    }
+
+    document.getElementById('goToRegister').addEventListener('click', () => {
+      hideError();
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('registerForm').style.display = 'block';
+    });
+
+    document.getElementById('goToLogin').addEventListener('click', () => {
+      hideError();
+      document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('loginForm').style.display = 'block';
+    });
+
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      hideError();
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      if (!email || !password) { showError('이메일과 비밀번호를 입력해주세요.'); return; }
+      const res = await API.login(email, password);
+      if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
+      API.setToken(res.token);
+      API.setUser(res.user);
+      window.location.href = 'calendar.html';
+    });
+
+    document.getElementById('registerBtn').addEventListener('click', async () => {
+      hideError();
+      const data = {
+        email: document.getElementById('regEmail').value.trim(),
+        password: document.getElementById('regPassword').value,
+        name: document.getElementById('regName').value.trim(),
+        grade: parseInt(document.getElementById('regGrade').value),
+        class_number: parseInt(document.getElementById('regClass').value)
+      };
+      if (!data.email || !data.password || !data.name) { showError('모든 필드를 입력해주세요.'); return; }
+      if (data.password.length < 4) { showError('비밀번호는 4자 이상 입력해주세요.'); return; }
+      const res = await API.register(data);
+      if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
+      API.setToken(res.token);
+      API.setUser(res.user);
+      window.location.href = 'calendar.html';
+    });
+
+    document.querySelectorAll('#loginEmail, #loginPassword').forEach(el => {
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('loginBtn').click(); });
+    });
+    document.querySelectorAll('#regEmail, #regPassword, #regName').forEach(el => {
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('registerBtn').click(); });
+    });
+
+    if (API.getToken()) {
+      API.me().then(data => {
+        if (data && data.user_id) {
+          API.setUser({ id: data.user_id, email: data.email, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled });
+          window.location.href = 'calendar.html';
+        }
+      });
+    }
+  </script>
+</body>
+</html>

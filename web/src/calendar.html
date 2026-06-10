@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>과제 알리미 - 날짜화면</title>
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+  <header class="app-header">
+    <h1 onclick="location.href='calendar.html'">과제 알리미</h1>
+    <nav>
+      <a href="calendar.html" class="active">날짜화면</a>
+      <a href="register.html">과제등록</a>
+      <a href="messages.html">메세지</a>
+      <a href="settings.html">설정</a>
+    </nav>
+    <div class="user-info">
+      <span class="user-name" id="userName"></span>
+      <button class="logout-btn" onclick="API.logout()">로그아웃</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="stats">
+      <div class="stat-card urgent"><div class="num" id="urgentCount">0</div><div class="label">긴급</div></div>
+      <div class="stat-card normal"><div class="num" id="normalCount">0</div><div class="label">진행중</div></div>
+      <div class="stat-card done"><div class="num" id="doneCount">0</div><div class="label">완료</div></div>
+    </div>
+
+    <div class="calendar-nav">
+      <button id="prevMonth">&lt; 이전</button>
+      <h2 id="monthTitle"></h2>
+      <button id="nextMonth">다음 &gt;</button>
+    </div>
+
+    <div class="calendar">
+      <div class="calendar-header">
+        <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+      </div>
+      <div class="calendar-body" id="calendarBody"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="modal-content">
+      <h3 id="modalTitle"></h3>
+      <div id="taskList"></div>
+      <button class="btn btn-secondary btn-sm" style="margin-top:15px;width:100%" id="closeModal">닫기</button>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=2"></script>
+  <script>
+    let currentDate = new Date();
+    let assignments = [];
+
+    API.requireAuth();
+
+    async function init() {
+      const serverUser = await API.me();
+      if (serverUser && serverUser.user_id) {
+        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number, profile_image_url: serverUser.profile_image_url, is_alarm_enabled: serverUser.is_alarm_enabled });
+      }
+      await API.loadUserInfo();
+      const user = API.getUser();
+      if (!user) return;
+      const data = await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
+      if (data) assignments = data;
+      renderCalendar();
+    }
+
+    function renderCalendar() {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const user = API.getUser();
+
+      document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월${user ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}`;
+
+      const firstDay = new Date(year, month, 1).getDay();
+      const lastDate = new Date(year, month + 1, 0).getDate();
+      const today = new Date();
+
+      let html = '';
+      for (let i = 0; i < firstDay; i++) html += '<div class="day empty"></div>';
+
+      for (let d = 1; d <= lastDate; d++) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
+        const dayTasks = assignments.filter(a => a.due_date === dateStr);
+
+        let tags = '';
+        dayTasks.sort((a, b) => a.is_completed === b.is_completed ? 0 : a.is_completed ? 1 : -1).forEach(a => {
+          const cls = a.is_completed ? 'done' : 'normal';
+          tags += `<div class="task-tag ${cls} task-item-el" data-id="${a.assignment_id}">${a.title}</div>`;
+        });
+
+        html += `<div class="day${isToday ? ' today' : ''}" data-date="${dateStr}">
+          <div class="date">${d}</div>${tags}</div>`;
+      }
+
+      document.getElementById('calendarBody').innerHTML = html;
+      updateStats();
+    }
+
+    function updateStats() {
+      const urgent = assignments.filter(a => !a.is_completed && new Date(a.due_date) <= new Date(Date.now() + 86400000 * 2));
+      const normal = assignments.filter(a => !a.is_completed && new Date(a.due_date) > new Date(Date.now() + 86400000 * 2));
+      const done = assignments.filter(a => a.is_completed);
+      document.getElementById('urgentCount').textContent = urgent.length;
+      document.getElementById('normalCount').textContent = normal.length;
+      document.getElementById('doneCount').textContent = done.length;
+    }
+
+    document.getElementById('calendarBody').addEventListener('click', async (e) => {
+      const el = e.target.closest('.task-item-el');
+      if (el) {
+        const id = parseInt(el.dataset.id);
+        const task = assignments.find(a => a.assignment_id === id);
+        if (!task) return;
+        const newStatus = !task.is_completed;
+        const res = await API.toggleAssignment(id, newStatus);
+        if (res && res.success === false) return;
+        task.is_completed = newStatus ? 1 : 0;
+        renderCalendar();
+        return;
+      }
+
+      const day = e.target.closest('.day');
+      if (day && !day.classList.contains('empty')) {
+        const date = day.dataset.date;
+        const dayTasks = assignments.filter(a => a.due_date === date);
+        if (dayTasks.length === 0) return;
+
+        document.getElementById('modalTitle').textContent = `${date} 과제`;
+        let html = '';
+        dayTasks.forEach(a => {
+          html += `<div class="assignment-item${a.is_completed ? ' done' : ''}">
+            <div class="info">
+              <div class="title">${a.title}</div>
+              <div class="meta">${a.creator_name || '선생님'} · ${a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
+            </div>
+            <div class="actions">
+              ${!a.is_completed ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}
+              <button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>
+            </div>
+          </div>`;
+        });
+        document.getElementById('taskList').innerHTML = html;
+        document.getElementById('modal').classList.add('show');
+      }
+    });
+
+    document.getElementById('taskList').addEventListener('click', async (e) => {
+      const id = parseInt(e.target.dataset.id);
+      if (e.target.classList.contains('modal-complete')) {
+        const res = await API.toggleAssignment(id, true);
+        if (res && res.success === false) return;
+        const task = assignments.find(a => a.assignment_id === id);
+        if (task) task.is_completed = 1;
+        renderCalendar();
+        document.getElementById('modal').classList.remove('show');
+      }
+      if (e.target.classList.contains('modal-delete')) {
+        const res = await API.deleteAssignment(id);
+        if (res && res.success === false) return;
+        assignments = assignments.filter(a => a.assignment_id !== id);
+        renderCalendar();
+        document.getElementById('modal').classList.remove('show');
+      }
+    });
+
+    document.getElementById('prevMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
+    document.getElementById('nextMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
+    document.getElementById('closeModal').addEventListener('click', () => document.getElementById('modal').classList.remove('show'));
+    document.getElementById('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') document.getElementById('modal').classList.remove('show'); });
+
+    init();
+  </script>
+</body>
+</html>

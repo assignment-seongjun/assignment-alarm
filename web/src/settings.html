@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>과제 알리미 - 설정</title>
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+  <header class="app-header">
+    <h1 onclick="location.href='calendar.html'">과제 알리미</h1>
+    <nav>
+      <a href="calendar.html">날짜화면</a>
+      <a href="register.html">과제등록</a>
+      <a href="messages.html">메세지</a>
+      <a href="settings.html" class="active">설정</a>
+    </nav>
+    <div class="user-info">
+      <span class="user-name" id="userName"></span>
+      <button class="logout-btn" onclick="API.logout()">로그아웃</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <div class="settings-section">
+        <h3>프로필</h3>
+        <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+          <div class="profile-avatar" id="profileAvatar">?</div>
+          <div style="flex:1">
+            <div class="form-group">
+              <label>이름</label>
+              <input type="text" id="settingName" placeholder="이름">
+            </div>
+            <div class="form-group">
+              <label>이메일</label>
+              <input type="email" id="settingEmail" disabled style="background:#f5f5f5">
+            </div>
+            <div class="form-group">
+              <label>소속</label>
+              <input type="text" id="settingClass" disabled style="background:#f5f5f5">
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="saveProfileBtn" style="margin-top:10px">프로필 저장</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>알림 설정</h3>
+        <div class="toggle-row">
+          <label>과제 알림</label>
+          <div class="toggle on" id="alarmToggle"></div>
+        </div>
+        <p style="font-size:0.8rem;color:#999;margin-top:5px">새 과제 등록 및 마감일 알림을 받습니다.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>계정</h3>
+        <button class="btn btn-secondary" onclick="API.logout()">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=2"></script>
+  <script>
+    API.requireAuth();
+
+    async function init() {
+      const serverUser = await API.me();
+      if (serverUser && serverUser.user_id) {
+        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number, profile_image_url: serverUser.profile_image_url, is_alarm_enabled: serverUser.is_alarm_enabled });
+      }
+      await API.loadUserInfo();
+      await loadProfile();
+    }
+
+    async function loadProfile() {
+      const data = await API.me();
+      if (!data || data.error) return;
+
+      document.getElementById('settingName').value = data.name;
+      document.getElementById('settingEmail').value = data.email;
+      document.getElementById('settingClass').value = `${data.grade}학년 ${data.class_number}반`;
+
+      const avatar = document.getElementById('profileAvatar');
+      if (data.profile_image_url) {
+        avatar.innerHTML = `<img src="${data.profile_image_url}" style="width:80px;height:80px;border-radius:50%;object-fit:cover">`;
+      } else {
+        avatar.textContent = data.name.charAt(0);
+      }
+
+      const toggle = document.getElementById('alarmToggle');
+      if (data.is_alarm_enabled) toggle.classList.add('on');
+      else toggle.classList.remove('on');
+
+      const user = API.getUser();
+      if (user) {
+        user.name = data.name;
+        user.grade = data.grade;
+        user.class_number = data.class_number;
+        API.setUser(user);
+      }
+    }
+
+    document.getElementById('saveProfileBtn').addEventListener('click', async () => {
+      const name = document.getElementById('settingName').value.trim();
+      if (!name) { alert('이름을 입력해주세요.'); return; }
+      const res = await API.updateUser(API.getUser().id, { name });
+      if (res && res.success) {
+        const user = API.getUser();
+        user.name = name;
+        API.setUser(user);
+        API.loadUserInfo();
+        document.getElementById('profileAvatar').textContent = name.charAt(0);
+        alert('프로필이 저장되었습니다.');
+      } else {
+        alert('저장에 실패했습니다.');
+      }
+    });
+
+    document.getElementById('alarmToggle').addEventListener('click', async function() {
+      const newVal = !this.classList.contains('on');
+      this.classList.toggle('on');
+      await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
+    });
+
+    init();
+  </script>
+</body>
+</html>

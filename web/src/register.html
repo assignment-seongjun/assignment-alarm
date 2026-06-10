@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>과제 알리미 - 과제 등록</title>
+  <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+  <header class="app-header">
+    <h1 onclick="location.href='calendar.html'">과제 알리미</h1>
+    <nav>
+      <a href="calendar.html">날짜화면</a>
+      <a href="register.html" class="active">과제등록</a>
+      <a href="messages.html">메세지</a>
+      <a href="settings.html">설정</a>
+    </nav>
+    <div class="user-info">
+      <span class="user-name" id="userName"></span>
+      <button class="logout-btn" onclick="API.logout()">로그아웃</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h3>새 과제 등록</h3>
+      <form id="assignmentForm" onsubmit="return false;">
+        <div class="form-group">
+          <label>과제명</label>
+          <input type="text" id="taskTitle" placeholder="과제 이름을 입력하세요" required>
+        </div>
+        <div class="form-group">
+          <label>상세 내용</label>
+          <textarea id="taskContent" placeholder="과제에 대한 설명을 입력하세요 (선택)"></textarea>
+        </div>
+        <div class="form-group">
+          <label>마감일</label>
+          <input type="date" id="taskDate" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>대상 학년</label>
+            <select id="targetGrade">
+              <option value="1">1학년</option>
+              <option value="2">2학년</option>
+              <option value="3">3학년</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>대상 반 (전체는 선택하지 않음)</label>
+            <select id="targetClass">
+              <option value="">전체</option>
+              <option value="1">1반</option>
+              <option value="2">2반</option>
+              <option value="3">3반</option>
+              <option value="4">4반</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-primary" id="saveBtn">등록하기</button>
+          <button class="btn btn-secondary" type="button" onclick="location.href='calendar.html'">취소</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>내가 등록한 과제</h3>
+      <div id="myAssignments"><div class="empty-state">등록한 과제가 없습니다.</div></div>
+    </div>
+  </div>
+
+  <script src="js/api.js?v=2"></script>
+  <script>
+    API.requireAuth();
+
+    async function init() {
+      const serverUser = await API.me();
+      if (serverUser && serverUser.user_id) {
+        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number });
+      }
+      await API.loadUserInfo();
+      document.getElementById('taskDate').valueAsDate = new Date();
+      await loadMyAssignments();
+    }
+
+    async function loadMyAssignments() {
+      const user = API.getUser();
+      if (!user) return;
+      const data = await API.getAssignments(user.grade, user.class_number);
+      const mine = data ? data.filter(a => a.created_by === user.id) : [];
+      const container = document.getElementById('myAssignments');
+      if (mine.length === 0) {
+        container.innerHTML = '<div class="empty-state">등록한 과제가 없습니다.</div>';
+        return;
+      }
+      container.innerHTML = mine.map(a => `
+        <div class="assignment-item">
+          <div class="info">
+            <div class="title">${a.title}</div>
+            <div class="meta">${a.due_date} · ${a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체'}</div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-danger btn-sm delete-my" data-id="${a.assignment_id}">삭제</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      const title = document.getElementById('taskTitle').value.trim();
+      const content = document.getElementById('taskContent').value.trim();
+      const due_date = document.getElementById('taskDate').value;
+      const target_grade = parseInt(document.getElementById('targetGrade').value);
+      const targetClassEl = document.getElementById('targetClass');
+      const target_class = targetClassEl.value ? parseInt(targetClassEl.value) : null;
+
+      if (!title || !due_date) { alert('과제명과 마감일을 입력해주세요.'); return; }
+
+      const res = await API.createAssignment({ title, content: content || null, due_date, target_grade, target_class });
+      if (res && res.success) {
+        alert('과제가 등록되었습니다.');
+        document.getElementById('taskTitle').value = '';
+        document.getElementById('taskContent').value = '';
+        document.getElementById('taskDate').valueAsDate = new Date();
+        loadMyAssignments();
+      } else {
+        alert(res?.error || '등록에 실패했습니다.');
+      }
+    });
+
+    document.getElementById('myAssignments').addEventListener('click', async (e) => {
+      if (e.target.classList.contains('delete-my')) {
+        if (!confirm('정말 삭제하시겠습니까?')) return;
+        await API.deleteAssignment(parseInt(e.target.dataset.id));
+        loadMyAssignments();
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
