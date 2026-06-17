@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=3">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <header class="app-header">
@@ -16,6 +16,18 @@
       <a href="settings.html">설정</a>
     </nav>
     <div class="user-info">
+      <div class="notification-area">
+        <button class="notification-btn" id="notificationBtn" type="button">알림 <span class="notification-badge" id="notificationBadge">0</span></button>
+        <div class="notification-panel" id="notificationPanel">
+          <div class="notification-panel-header">
+            <strong>최근 알림</strong>
+            <button class="notification-refresh-btn" id="notificationRefreshBtn" type="button">새로고침</button>
+          </div>
+          <div class="notification-list" id="notificationList">
+            <div class="notification-empty">불러오는 중...</div>
+          </div>
+        </div>
+      </div>
       <span class="user-name" id="userName"></span>
       <button class="logout-btn" onclick="API.logout()">로그아웃</button>
     </div>
@@ -53,7 +65,7 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=4"></script>
+  <script src="js/api.js?v=5"></script>
   <script>
     let currentDate = new Date();
     let assignments = [];
@@ -64,6 +76,7 @@
       const user = await API.ensureUser();
       if (!user) return;
       await API.loadUserInfo();
+      await API.initNotifications();
       const data = await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
       if (data) assignments = data;
       renderCalendar();
@@ -171,6 +184,7 @@
         if (!res || !res.success) return;
         assignments = assignments.filter(a => a.assignment_id !== id);
         renderCalendar();
+        await API.refreshNotifications();
         document.getElementById('modal').classList.remove('show');
       }
     });

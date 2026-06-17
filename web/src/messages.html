@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 메세지</title>
-  <link rel="stylesheet" href="css/style.css?v=2">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <header class="app-header">
@@ -16,6 +16,18 @@
       <a href="settings.html">설정</a>
     </nav>
     <div class="user-info">
+      <div class="notification-area">
+        <button class="notification-btn" id="notificationBtn" type="button">알림 <span class="notification-badge" id="notificationBadge">0</span></button>
+        <div class="notification-panel" id="notificationPanel">
+          <div class="notification-panel-header">
+            <strong>최근 알림</strong>
+            <button class="notification-refresh-btn" id="notificationRefreshBtn" type="button">새로고침</button>
+          </div>
+          <div class="notification-list" id="notificationList">
+            <div class="notification-empty">불러오는 중...</div>
+          </div>
+        </div>
+      </div>
       <span class="user-name" id="userName"></span>
       <button class="logout-btn" onclick="API.logout()">로그아웃</button>
     </div>
@@ -43,7 +55,7 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=4"></script>
+  <script src="js/api.js?v=5"></script>
   <script>
     let filterType = 'grade';
     let messages = [];
@@ -54,6 +66,7 @@
       const user = await API.ensureUser();
       if (!user) return;
       await API.loadUserInfo();
+      await API.initNotifications();
       await loadMessages();
     }
 
@@ -106,7 +119,8 @@
       const res = await API.sendMessage({ content, type });
       if (res && res.success) {
         document.getElementById('msgContent').value = '';
-        loadMessages();
+        await loadMessages();
+        await API.refreshNotifications();
       } else {
         alert('전송에 실패했습니다.');
       }
@@ -118,6 +132,7 @@
       const res = await API.deleteMessage(parseInt(e.target.dataset.id));
       if (!res || !res.success) { alert(res?.error || '삭제에 실패했습니다.'); return; }
       await loadMessages();
+      await API.refreshNotifications();
     });
 
     document.getElementById('msgType').addEventListener('change', async (e) => {
