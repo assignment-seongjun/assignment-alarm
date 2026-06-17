@@ -20,6 +20,15 @@ const API = {
     localStorage.removeItem('user');
   },
 
+  escapeHTML(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
   async request(method, url, body) {
     const headers = { 'Content-Type': 'application/json' };
     const hadToken = !!this.getToken();
@@ -197,11 +206,11 @@ const API = {
       list.innerHTML = items.map(item => `
         <button type="button" class="notification-item" data-link="${item.link}">
           <div class="notification-item-header">
-            <span class="notification-item-title">${item.title}</span>
+            <span class="notification-item-title">${this.escapeHTML(item.title)}</span>
             <span class="notification-item-time">${this.formatNotificationTime(item.created_at)}</span>
           </div>
-          <div class="notification-item-body">${item.body}</div>
-          <div class="notification-item-meta">${item.meta}</div>
+          <div class="notification-item-body">${this.escapeHTML(item.body)}</div>
+          <div class="notification-item-meta">${this.escapeHTML(item.meta)}</div>
         </button>
       `).join('');
     };

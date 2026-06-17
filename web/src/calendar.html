@@ -105,7 +105,7 @@
         let tags = '';
         dayTasks.sort((a, b) => a.is_completed === b.is_completed ? 0 : a.is_completed ? 1 : -1).forEach(a => {
           const cls = a.is_completed ? 'done' : 'normal';
-          tags += `<div class="task-tag ${cls} task-item-el" data-id="${a.assignment_id}">${a.title}</div>`;
+          tags += `<div class="task-tag ${cls} task-item-el" data-id="${a.assignment_id}">${API.escapeHTML(a.title)}</div>`;
         });
 
         html += `<div class="day${isToday ? ' today' : ''}" data-date="${dateStr}">
@@ -154,8 +154,8 @@
         dayTasks.forEach(a => {
           html += `<div class="assignment-item${a.is_completed ? ' done' : ''}">
             <div class="info">
-              <div class="title">${a.title}</div>
-              <div class="meta">${a.creator_name || '선생님'} · ${a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
+              <div class="title">${API.escapeHTML(a.title)}</div>
+              <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
             </div>
             <div class="actions">
               ${!a.is_completed ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}

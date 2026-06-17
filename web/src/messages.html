@@ -100,10 +100,10 @@
         const canDelete = user && Number(m.sender_id) === Number(user.id);
         return `<div class="message-item">
           <div class="msg-header">
-            <span class="msg-sender">${m.sender_name} ${badge}</span>
+            <span class="msg-sender">${API.escapeHTML(m.sender_name)} ${badge}</span>
             <span class="msg-time">${time}</span>
           </div>
-          <div class="msg-content">${m.content}</div>
+          <div class="msg-content">${API.escapeHTML(m.content)}</div>
           ${canDelete ? `<div class="actions" style="margin-top:10px"><button class="btn btn-danger btn-sm delete-message" data-id="${m.message_id}">삭제</button></div>` : ''}
         </div>`;
       }).join('');

@@ -93,8 +93,8 @@
       container.innerHTML = mine.map(a => `
         <div class="assignment-item">
           <div class="info">
-            <div class="title">${a.title}</div>
-            <div class="meta">${a.due_date} · ${a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체'}</div>
+            <div class="title">${API.escapeHTML(a.title)}</div>
+            <div class="meta">${API.escapeHTML(a.due_date)} · ${API.escapeHTML(a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체')}</div>
           </div>
           <div class="actions">
             <button class="btn btn-danger btn-sm delete-my" data-id="${a.assignment_id}">삭제</button>
