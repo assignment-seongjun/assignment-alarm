@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 로그인</title>
-  <link rel="stylesheet" href="css/style.css?v=2">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body class="login-page">
   <div class="auth-page">
@@ -16,8 +16,8 @@
 
       <div id="loginForm">
         <div class="form-group">
-          <label>이메일</label>
-          <input type="email" id="loginEmail" placeholder="email@example.com">
+          <label>이름</label>
+          <input type="text" id="loginName" placeholder="이름">
         </div>
         <div class="form-group">
           <label>비밀번호</label>
@@ -29,16 +29,16 @@
 
       <div id="registerForm" style="display:none">
         <div class="form-group">
-          <label>이메일</label>
-          <input type="email" id="regEmail" placeholder="email@example.com">
+          <label>이름</label>
+          <input type="text" id="regName" placeholder="이름">
         </div>
         <div class="form-group">
           <label>비밀번호</label>
           <input type="password" id="regPassword" placeholder="비밀번호">
         </div>
         <div class="form-group">
-          <label>이름</label>
-          <input type="text" id="regName" placeholder="이름">
+          <label>비밀번호 확인</label>
+          <input type="password" id="regPasswordConfirm" placeholder="비밀번호 확인">
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -65,7 +65,7 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=4"></script>
+  <script src="js/api.js?v=6"></script>
   <script>
     function showError(msg) {
       const el = document.getElementById('authError');
@@ -91,10 +91,10 @@
 
     document.getElementById('loginBtn').addEventListener('click', async () => {
       hideError();
-      const email = document.getElementById('loginEmail').value.trim();
+      const name = document.getElementById('loginName').value.trim();
       const password = document.getElementById('loginPassword').value;
-      if (!email || !password) { showError('이메일과 비밀번호를 입력해주세요.'); return; }
-      const res = await API.login(email, password);
+      if (!name || !password) { showError('이름과 비밀번호를 입력해주세요.'); return; }
+      const res = await API.login(name, password);
       if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
       API.setToken(res.token);
       API.setUser(res.user);
@@ -103,15 +103,17 @@
 
     document.getElementById('registerBtn').addEventListener('click', async () => {
       hideError();
+      const password = document.getElementById('regPassword').value;
+      const passwordConfirm = document.getElementById('regPasswordConfirm').value;
       const data = {
-        email: document.getElementById('regEmail').value.trim(),
-        password: document.getElementById('regPassword').value,
         name: document.getElementById('regName').value.trim(),
+        password,
         grade: parseInt(document.getElementById('regGrade').value),
         class_number: parseInt(document.getElementById('regClass').value)
       };
-      if (!data.email || !data.password || !data.name) { showError('모든 필드를 입력해주세요.'); return; }
+      if (!data.name || !data.password || !passwordConfirm) { showError('모든 필드를 입력해주세요.'); return; }
       if (data.password.length < 4) { showError('비밀번호는 4자 이상 입력해주세요.'); return; }
+      if (data.password !== passwordConfirm) { showError('비밀번호 확인이 일치하지 않습니다.'); return; }
       const res = await API.register(data);
       if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
       API.setToken(res.token);
@@ -119,10 +121,10 @@
       window.location.href = 'calendar.html';
     });
 
-    document.querySelectorAll('#loginEmail, #loginPassword').forEach(el => {
+    document.querySelectorAll('#loginName, #loginPassword').forEach(el => {
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('loginBtn').click(); });
     });
-    document.querySelectorAll('#regEmail, #regPassword, #regName').forEach(el => {
+    document.querySelectorAll('#regName, #regPassword, #regPasswordConfirm').forEach(el => {
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('registerBtn').click(); });
     });
 

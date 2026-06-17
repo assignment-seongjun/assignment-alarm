@@ -43,7 +43,7 @@ const API = {
   put(url, body) { return this.request('PUT', url, body); },
   del(url) { return this.request('DELETE', url); },
 
-  login(email, password) { return this.post('/api/auth/login', { email, password }); },
+  login(name, password) { return this.post('/api/auth/login', { name, password }); },
   register(data) { return this.post('/api/auth/register', data); },
   me() { return this.get('/api/auth/me'); },
 

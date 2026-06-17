@@ -80,6 +80,10 @@ function authMiddleware(req, res, next) {
   }
 }
 
+function createPlaceholderEmail() {
+  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@assignment.local`;
+}
+
 async function getCurrentUser(userId) {
   const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number FROM users WHERE user_id = ?', [userId]);
   return rows[0] || null;
@@ -88,26 +92,31 @@ async function getCurrentUser(userId) {
 // Auth
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, name, grade, class_number } = req.body;
-    if (!email || !password || !name || !grade || !class_number) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
+    const name = String(req.body.name || '').trim();
+    const { password, grade, class_number } = req.body;
+    if (!password || !name || !grade || !class_number) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
+    const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [name]);
+    if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
     const hash = await bcrypt.hash(password, 10);
+    const email = createPlaceholderEmail();
     const [result] = await pool.execute('INSERT INTO users (email, password, name, grade, class_number) VALUES (?, ?, ?, ?, ?)', [email, hash, name, grade, class_number]);
     const token = jwt.sign({ id: result.insertId, email, name, grade, class_number }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: result.insertId, email, name, grade, class_number } });
   } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 가입된 이메일입니다.' });
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: '이메일과 비밀번호를 입력해주세요.' });
-    const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
-    if (rows.length === 0) return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
+    const name = String(req.body.name || '').trim();
+    const { password } = req.body;
+    if (!name || !password) return res.status(400).json({ error: '이름과 비밀번호를 입력해주세요.' });
+    const [rows] = await pool.execute('SELECT * FROM users WHERE name = ? LIMIT 1', [name]);
+    if (rows.length === 0) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
     const user = rows[0];
-    if (!await bcrypt.compare(password, user.password)) return res.status(401).json({ error: '이메일 또는 비밀번호가 일치하지 않습니다.' });
+    if (!await bcrypt.compare(password, user.password)) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
     const token = jwt.sign({ id: user.user_id, email: user.email, name: user.name, grade: user.grade, class_number: user.class_number }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.user_id, email: user.email, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled } });
   } catch {
@@ -139,6 +148,13 @@ app.get('/api/users/:id', authMiddleware, async (req, res) => {
 app.put('/api/users/:id', authMiddleware, async (req, res) => {
   try {
     if (parseInt(req.params.id) !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: '이름을 입력해주세요.' });
+      const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? AND user_id <> ? LIMIT 1', [name, req.params.id]);
+      if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
+      req.body.name = name;
+    }
     const allowed = ['name', 'profile_image_url', 'is_alarm_enabled'];
     const updates = [];
     const values = [];

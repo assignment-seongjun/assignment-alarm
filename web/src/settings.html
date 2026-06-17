@@ -45,10 +45,6 @@
               <input type="text" id="settingName" placeholder="이름">
             </div>
             <div class="form-group">
-              <label>이메일</label>
-              <input type="email" id="settingEmail" disabled style="background:#f5f5f5">
-            </div>
-            <div class="form-group">
               <label>소속</label>
               <input type="text" id="settingClass" disabled style="background:#f5f5f5">
             </div>
@@ -90,7 +86,6 @@
       if (!data || data.error) return;
 
       document.getElementById('settingName').value = data.name;
-      document.getElementById('settingEmail').value = data.email;
       document.getElementById('settingClass').value = `${data.grade}학년 ${data.class_number}반`;
 
       const avatar = document.getElementById('profileAvatar');
@@ -125,7 +120,7 @@
         document.getElementById('profileAvatar').textContent = name.charAt(0);
         alert('프로필이 저장되었습니다.');
       } else {
-        alert('저장에 실패했습니다.');
+        alert(res?.error || '저장에 실패했습니다.');
       }
     });
 
