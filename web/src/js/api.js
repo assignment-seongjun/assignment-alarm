@@ -60,7 +60,6 @@ const API = {
     if (!u) return null;
     return {
       id: u.id || u.user_id,
-      email: u.email,
       name: u.name,
       grade: u.grade,
       class_number: u.class_number,

@@ -25,9 +25,8 @@ const pool = mysql.createPool(dbConfig);
 const bootstrapSchema = [
   `CREATE TABLE IF NOT EXISTS users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    name VARCHAR(100) NOT NULL,
+    name VARCHAR(100) NOT NULL UNIQUE,
     grade INT NOT NULL,
     class_number INT NOT NULL,
     profile_image_url VARCHAR(500) DEFAULT NULL,
@@ -80,13 +79,50 @@ function authMiddleware(req, res, next) {
   }
 }
 
-function createPlaceholderEmail() {
-  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@assignment.local`;
+async function getCurrentUser(userId) {
+  const [rows] = await pool.execute('SELECT user_id, name, grade, class_number FROM users WHERE user_id = ?', [userId]);
+  return rows[0] || null;
 }
 
-async function getCurrentUser(userId) {
-  const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number FROM users WHERE user_id = ?', [userId]);
-  return rows[0] || null;
+async function migrateSchema(conn) {
+  const [emailColumns] = await conn.execute(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'email'`
+  );
+
+  if (emailColumns.length > 0) {
+    const [emailIndexes] = await conn.execute(
+      `SELECT INDEX_NAME
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'users'
+         AND COLUMN_NAME = 'email'
+         AND INDEX_NAME <> 'PRIMARY'`
+    );
+
+    for (const index of emailIndexes) {
+      await conn.execute(`ALTER TABLE users DROP INDEX \`${index.INDEX_NAME}\``);
+    }
+
+    await conn.execute('ALTER TABLE users DROP COLUMN email');
+  }
+
+  const [nameUniqueIndexes] = await conn.execute(
+    `SELECT INDEX_NAME
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'name'
+       AND NON_UNIQUE = 0
+       AND INDEX_NAME <> 'PRIMARY'`
+  );
+
+  if (nameUniqueIndexes.length === 0) {
+    await conn.execute('ALTER TABLE users ADD UNIQUE INDEX users_name_unique (name)');
+  }
 }
 
 // Auth
@@ -98,10 +134,9 @@ app.post('/api/auth/register', async (req, res) => {
     const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [name]);
     if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
     const hash = await bcrypt.hash(password, 10);
-    const email = createPlaceholderEmail();
-    const [result] = await pool.execute('INSERT INTO users (email, password, name, grade, class_number) VALUES (?, ?, ?, ?, ?)', [email, hash, name, grade, class_number]);
-    const token = jwt.sign({ id: result.insertId, email, name, grade, class_number }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: result.insertId, email, name, grade, class_number } });
+    const [result] = await pool.execute('INSERT INTO users (password, name, grade, class_number) VALUES (?, ?, ?, ?)', [hash, name, grade, class_number]);
+    const token = jwt.sign({ id: result.insertId, name, grade, class_number }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: result.insertId, name, grade, class_number } });
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -117,8 +152,8 @@ app.post('/api/auth/login', async (req, res) => {
     if (rows.length === 0) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
     const user = rows[0];
     if (!await bcrypt.compare(password, user.password)) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
-    const token = jwt.sign({ id: user.user_id, email: user.email, name: user.name, grade: user.grade, class_number: user.class_number }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.user_id, email: user.email, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled } });
+    const token = jwt.sign({ id: user.user_id, name: user.name, grade: user.grade, class_number: user.class_number }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled } });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -126,7 +161,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.user.id]);
+    const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.user.id]);
     if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     res.json(rows[0]);
   } catch {
@@ -137,7 +172,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 // Users
 app.get('/api/users/:id', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.params.id]);
+    const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     res.json(rows[0]);
   } catch {
@@ -338,6 +373,7 @@ async function init() {
       for (const statement of bootstrapSchema) {
         await conn.execute(statement);
       }
+      await migrateSchema(conn);
       conn.release();
       console.log(`MySQL connected: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
       app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

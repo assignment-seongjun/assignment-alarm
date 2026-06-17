@@ -131,7 +131,7 @@
     if (API.getToken()) {
       API.me().then(data => {
         if (data && data.user_id) {
-          API.setUser({ id: data.user_id, email: data.email, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled });
+          API.setUser({ id: data.user_id, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled });
           window.location.href = 'calendar.html';
         }
       });
