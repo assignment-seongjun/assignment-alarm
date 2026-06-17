@@ -5,19 +5,65 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 
 const app = express();
-const PORT = 80;
-const JWT_SECRET = 'assignment-alarm-secret-key-2024';
+const PORT = Number(process.env.PORT) || 80;
+const JWT_SECRET = process.env.JWT_SECRET || 'assignment-alarm-secret-key-2024';
 
-const pool = mysql.createPool({
-  host: 'mysql',
-  user: 'user',
-  password: 'userpassword',
-  database: 'assignment_alarm',
+const dbConfig = {
+  host: process.env.MYSQLHOST || process.env.DB_HOST || 'mysql',
+  port: Number(process.env.MYSQLPORT || process.env.DB_PORT) || 3306,
+  user: process.env.MYSQLUSER || process.env.DB_USER || 'user',
+  password: process.env.MYSQLPASSWORD || process.env.DB_PASSWORD || 'userpassword',
+  database: process.env.MYSQLDATABASE || process.env.DB_NAME || 'assignment_alarm',
   waitForConnections: true,
   connectionLimit: 10,
   charset: 'utf8mb4',
   dateStrings: true
-});
+};
+
+const pool = mysql.createPool(dbConfig);
+
+const bootstrapSchema = [
+  `CREATE TABLE IF NOT EXISTS users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    grade INT NOT NULL,
+    class_number INT NOT NULL,
+    profile_image_url VARCHAR(500) DEFAULT NULL,
+    is_alarm_enabled TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS assignments (
+    assignment_id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    due_date DATE NOT NULL,
+    target_grade INT NOT NULL,
+    target_class INT DEFAULT NULL,
+    created_by INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS messages (
+    message_id INT AUTO_INCREMENT PRIMARY KEY,
+    sender_id INT NOT NULL,
+    content TEXT NOT NULL,
+    type ENUM('grade', 'class') NOT NULL,
+    target_grade INT NOT NULL,
+    target_class INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS user_assignments (
+    user_id INT NOT NULL,
+    assignment_id INT NOT NULL,
+    is_completed TINYINT(1) DEFAULT 0,
+    PRIMARY KEY (user_id, assignment_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (assignment_id) REFERENCES assignments(assignment_id) ON DELETE CASCADE
+  )`
+];
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -273,8 +319,11 @@ async function init() {
     try {
       const conn = await pool.getConnection();
       await conn.ping();
+      for (const statement of bootstrapSchema) {
+        await conn.execute(statement);
+      }
       conn.release();
-      console.log('MySQL connected');
+      console.log(`MySQL connected: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
       app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
       return;
     } catch {
