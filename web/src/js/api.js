@@ -1,5 +1,7 @@
 const API = {
   currentUser: null,
+  bounceGuardEnabled: false,
+  lastTouchY: 0,
   getToken() { return localStorage.getItem('token'); },
   setToken(t) { localStorage.setItem('token', t); },
   clearToken() { localStorage.removeItem('token'); },
@@ -248,6 +250,53 @@ const API = {
 
   async refreshNotifications() {},
 
+  findScrollableParent(node) {
+    let current = node instanceof Element ? node : null;
+    while (current) {
+      const style = window.getComputedStyle(current);
+      const canScrollY = /(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight;
+      if (canScrollY) return current;
+      current = current.parentElement;
+    }
+
+    const root = document.scrollingElement || document.documentElement;
+    if (root && root.scrollHeight > window.innerHeight) return root;
+    return null;
+  },
+
+  initBounceGuard() {
+    if (this.bounceGuardEnabled || !('ontouchstart' in window)) return;
+    this.bounceGuardEnabled = true;
+
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      this.lastTouchY = e.touches[0].clientY;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length !== 1) return;
+
+      const currentY = e.touches[0].clientY;
+      const deltaY = currentY - this.lastTouchY;
+      this.lastTouchY = currentY;
+
+      const scrollable = this.findScrollableParent(e.target);
+      if (!scrollable) {
+        e.preventDefault();
+        return;
+      }
+
+      const scrollTop = scrollable.scrollTop;
+      const maxScrollTop = scrollable.scrollHeight - scrollable.clientHeight;
+      const atTop = scrollTop <= 0;
+      const atBottom = scrollTop >= maxScrollTop - 1;
+
+      if ((atTop && deltaY > 0) || (atBottom && deltaY < 0)) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+  },
+
   logout() {
     this.clearToken();
     this.clearUser();
@@ -266,4 +315,5 @@ const API = {
   }
 };
 
+API.initBounceGuard();
 window.API = API;

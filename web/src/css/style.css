@@ -1,5 +1,6 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f0f2f5; min-height: 100vh; color: #333; }
+html { min-height: 100%; overflow-x: hidden; overscroll-behavior: none; }
+body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f0f2f5; min-height: 100vh; color: #333; overflow-x: hidden; overscroll-behavior: none; }
 a { text-decoration: none; color: inherit; }
 
 /* Layout */
