@@ -1,9 +1,9 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { height: 100%; }
-body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f0f2f5; color: #333; overflow: hidden; }
+html, body { height: 100%; background: #f0f2f5; }
+body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; color: #333; overflow: hidden; }
 a { text-decoration: none; color: inherit; }
 
-.app-shell { height: 100dvh; min-height: 100vh; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+.app-shell { height: 100dvh; min-height: 100vh; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; background: #f0f2f5; }
 
 /* Layout */
 .app-header { background: #1a1a2e; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
