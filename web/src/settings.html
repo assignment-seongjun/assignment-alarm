@@ -61,15 +61,13 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=2"></script>
+  <script src="js/api.js?v=4"></script>
   <script>
     API.requireAuth();
 
     async function init() {
-      const serverUser = await API.me();
-      if (serverUser && serverUser.user_id) {
-        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number, profile_image_url: serverUser.profile_image_url, is_alarm_enabled: serverUser.is_alarm_enabled });
-      }
+      const user = await API.ensureUser();
+      if (!user) return;
       await API.loadUserInfo();
       await loadProfile();
     }
@@ -110,7 +108,7 @@
         const user = API.getUser();
         user.name = name;
         API.setUser(user);
-        API.loadUserInfo();
+        await API.loadUserInfo();
         document.getElementById('profileAvatar').textContent = name.charAt(0);
         alert('프로필이 저장되었습니다.');
       } else {

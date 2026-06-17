@@ -43,18 +43,16 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=2"></script>
+  <script src="js/api.js?v=4"></script>
   <script>
-    let filterType = null;
+    let filterType = 'grade';
     let messages = [];
 
     API.requireAuth();
 
     async function init() {
-      const serverUser = await API.me();
-      if (serverUser && serverUser.user_id) {
-        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number });
-      }
+      const user = await API.ensureUser();
+      if (!user) return;
       await API.loadUserInfo();
       await loadMessages();
     }
@@ -62,36 +60,38 @@
     async function loadMessages() {
       const user = API.getUser();
       if (!user) return;
-      const data = await API.getMessages(user.grade, user.class_number);
+      const data = await API.getMessages(user.grade, user.class_number, filterType);
       if (data) messages = data;
       renderMessages();
     }
 
     function renderMessages() {
-      let filtered = messages;
-      if (filterType === 'grade') filtered = messages.filter(m => m.type === 'grade');
-      else if (filterType === 'class') filtered = messages.filter(m => m.type === 'class');
-
       const user = API.getUser();
       document.getElementById('messageTitle').textContent =
-        filterType === 'grade' ? `📢 학년 메세지${user ? ' (' + user.grade + '학년)' : ''}` :
-        filterType === 'class' ? `💬 반 메세지${user ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}` :
-        '전체 메세지';
+        filterType === 'grade'
+          ? `📢 학년 메세지${user ? ' (' + user.grade + '학년)' : ''}`
+          : `💬 반 메세지${user ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}`;
+
+      document.getElementById('msgType').value = filterType;
+      document.getElementById('showGradeMsg').classList.toggle('active', filterType === 'grade');
+      document.getElementById('showClassMsg').classList.toggle('active', filterType === 'class');
 
       const container = document.getElementById('messageList');
-      if (filtered.length === 0) {
+      if (messages.length === 0) {
         container.innerHTML = '<div class="empty-state">메세지가 없습니다.</div>';
         return;
       }
-      container.innerHTML = filtered.map(m => {
+      container.innerHTML = messages.map(m => {
         const badge = m.type === 'grade' ? '<span class="msg-badge grade">학년</span>' : '<span class="msg-badge class">반</span>';
         const time = new Date(m.created_at).toLocaleString('ko-KR');
+        const canDelete = user && Number(m.sender_id) === Number(user.id);
         return `<div class="message-item">
           <div class="msg-header">
             <span class="msg-sender">${m.sender_name} ${badge}</span>
             <span class="msg-time">${time}</span>
           </div>
           <div class="msg-content">${m.content}</div>
+          ${canDelete ? `<div class="actions" style="margin-top:10px"><button class="btn btn-danger btn-sm delete-message" data-id="${m.message_id}">삭제</button></div>` : ''}
         </div>`;
       }).join('');
     }
@@ -103,10 +103,7 @@
       if (!content) { alert('내용을 입력해주세요.'); return; }
       if (!user) { alert('로그인이 필요합니다.'); return; }
 
-      const data = { content, type, target_grade: user.grade };
-      if (type === 'class') data.target_class = user.class_number;
-
-      const res = await API.sendMessage(data);
+      const res = await API.sendMessage({ content, type });
       if (res && res.success) {
         document.getElementById('msgContent').value = '';
         loadMessages();
@@ -115,14 +112,29 @@
       }
     });
 
-    document.getElementById('showGradeMsg').addEventListener('click', () => {
-      filterType = filterType === 'grade' ? null : 'grade';
-      renderMessages();
+    document.getElementById('messageList').addEventListener('click', async (e) => {
+      if (!e.target.classList.contains('delete-message')) return;
+      if (!confirm('정말 삭제하시겠습니까?')) return;
+      const res = await API.deleteMessage(parseInt(e.target.dataset.id));
+      if (!res || !res.success) { alert(res?.error || '삭제에 실패했습니다.'); return; }
+      await loadMessages();
     });
 
-    document.getElementById('showClassMsg').addEventListener('click', () => {
-      filterType = filterType === 'class' ? null : 'class';
-      renderMessages();
+    document.getElementById('msgType').addEventListener('change', async (e) => {
+      filterType = e.target.value;
+      await loadMessages();
+    });
+
+    document.getElementById('showGradeMsg').addEventListener('click', async () => {
+      if (filterType === 'grade') return;
+      filterType = 'grade';
+      await loadMessages();
+    });
+
+    document.getElementById('showClassMsg').addEventListener('click', async () => {
+      if (filterType === 'class') return;
+      filterType = 'class';
+      await loadMessages();
     });
 
     init();

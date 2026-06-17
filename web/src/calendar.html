@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=2">
+  <link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
   <header class="app-header">
@@ -30,7 +30,10 @@
 
     <div class="calendar-nav">
       <button id="prevMonth">&lt; 이전</button>
-      <h2 id="monthTitle"></h2>
+      <div class="calendar-title">
+        <h2 id="monthTitle"></h2>
+        <div id="classScope" style="color:#666;font-size:0.95rem;margin-top:4px"></div>
+      </div>
       <button id="nextMonth">다음 &gt;</button>
     </div>
 
@@ -50,7 +53,7 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=2"></script>
+  <script src="js/api.js?v=4"></script>
   <script>
     let currentDate = new Date();
     let assignments = [];
@@ -58,13 +61,9 @@
     API.requireAuth();
 
     async function init() {
-      const serverUser = await API.me();
-      if (serverUser && serverUser.user_id) {
-        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number, profile_image_url: serverUser.profile_image_url, is_alarm_enabled: serverUser.is_alarm_enabled });
-      }
-      await API.loadUserInfo();
-      const user = API.getUser();
+      const user = await API.ensureUser();
       if (!user) return;
+      await API.loadUserInfo();
       const data = await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
       if (data) assignments = data;
       renderCalendar();
@@ -75,7 +74,8 @@
       const month = currentDate.getMonth();
       const user = API.getUser();
 
-      document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월${user ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}`;
+      document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월`;
+      document.getElementById('classScope').textContent = user && user.grade && user.class_number ? `${user.grade}학년 ${user.class_number}반 과제` : '';
 
       const firstDay = new Date(year, month, 1).getDay();
       const lastDate = new Date(year, month + 1, 0).getDate();
@@ -104,8 +104,11 @@
     }
 
     function updateStats() {
-      const urgent = assignments.filter(a => !a.is_completed && new Date(a.due_date) <= new Date(Date.now() + 86400000 * 2));
-      const normal = assignments.filter(a => !a.is_completed && new Date(a.due_date) > new Date(Date.now() + 86400000 * 2));
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
+      const urgent = assignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
+      const normal = assignments.filter(a => !a.is_completed && a.due_date > twoDaysLater);
       const done = assignments.filter(a => a.is_completed);
       document.getElementById('urgentCount').textContent = urgent.length;
       document.getElementById('normalCount').textContent = normal.length;
@@ -120,7 +123,7 @@
         if (!task) return;
         const newStatus = !task.is_completed;
         const res = await API.toggleAssignment(id, newStatus);
-        if (res && res.success === false) return;
+        if (!res || !res.success) return;
         task.is_completed = newStatus ? 1 : 0;
         renderCalendar();
         return;
@@ -132,6 +135,7 @@
         const dayTasks = assignments.filter(a => a.due_date === date);
         if (dayTasks.length === 0) return;
 
+        const user = API.getUser();
         document.getElementById('modalTitle').textContent = `${date} 과제`;
         let html = '';
         dayTasks.forEach(a => {
@@ -142,7 +146,7 @@
             </div>
             <div class="actions">
               ${!a.is_completed ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}
-              <button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>
+              ${user && a.created_by === user.id ? `<button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>` : ''}
             </div>
           </div>`;
         });
@@ -153,9 +157,10 @@
 
     document.getElementById('taskList').addEventListener('click', async (e) => {
       const id = parseInt(e.target.dataset.id);
+      if (!id) return;
       if (e.target.classList.contains('modal-complete')) {
         const res = await API.toggleAssignment(id, true);
-        if (res && res.success === false) return;
+        if (!res || !res.success) return;
         const task = assignments.find(a => a.assignment_id === id);
         if (task) task.is_completed = 1;
         renderCalendar();
@@ -163,7 +168,7 @@
       }
       if (e.target.classList.contains('modal-delete')) {
         const res = await API.deleteAssignment(id);
-        if (res && res.success === false) return;
+        if (!res || !res.success) return;
         assignments = assignments.filter(a => a.assignment_id !== id);
         renderCalendar();
         document.getElementById('modal').classList.remove('show');

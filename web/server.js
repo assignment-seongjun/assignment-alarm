@@ -15,12 +15,13 @@ const pool = mysql.createPool({
   database: 'assignment_alarm',
   waitForConnections: true,
   connectionLimit: 10,
-  charset: 'utf8mb4'
+  charset: 'utf8mb4',
+  dateStrings: true
 });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'src')));
+app.use(express.static(path.join(__dirname, 'src'), { maxAge: 0, etag: false, lastModified: false }));
 
 function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
@@ -31,6 +32,11 @@ function authMiddleware(req, res, next) {
   } catch {
     return res.status(401).json({ error: '토큰이 만료되었습니다.' });
   }
+}
+
+async function getCurrentUser(userId) {
+  const [rows] = await pool.execute('SELECT user_id, email, name, grade, class_number FROM users WHERE user_id = ?', [userId]);
+  return rows[0] || null;
 }
 
 // Auth
@@ -86,6 +92,7 @@ app.get('/api/users/:id', authMiddleware, async (req, res) => {
 
 app.put('/api/users/:id', authMiddleware, async (req, res) => {
   try {
+    if (parseInt(req.params.id) !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
     const allowed = ['name', 'profile_image_url', 'is_alarm_enabled'];
     const updates = [];
     const values = [];
@@ -122,11 +129,15 @@ app.get('/api/assignments', authMiddleware, async (req, res) => {
 
 app.post('/api/assignments', authMiddleware, async (req, res) => {
   try {
-    const { title, content, due_date, target_grade, target_class } = req.body;
-    if (!title || !due_date || !target_grade) return res.status(400).json({ error: '과제명, 마감일, 대상 학년은 필수입니다.' });
+    const { title, content, due_date } = req.body;
+    if (!title || !due_date) return res.status(400).json({ error: '과제명과 마감일은 필수입니다.' });
+    const user = await getCurrentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    const target_grade = user.grade;
+    const target_class = user.class_number;
     const [result] = await pool.execute('INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)', [title, content || null, due_date, target_grade, target_class || null, req.user.id]);
     const assignmentId = result.insertId;
-    const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND (class_number = ? OR ? IS NULL)', [target_grade, target_class || '', target_class || null]);
+    const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND class_number = ?', [target_grade, target_class]);
     for (const s of students) {
       await pool.execute('INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)', [s.user_id, assignmentId]);
     }
@@ -138,14 +149,15 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
 
 app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
   try {
-    const { title, content, due_date, target_grade, target_class } = req.body;
+    const [rows] = await pool.execute('SELECT created_by FROM assignments WHERE assignment_id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
+    if (rows[0].created_by !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+    const { title, content, due_date } = req.body;
     const updates = [];
     const values = [];
     if (title !== undefined) { updates.push('title = ?'); values.push(title); }
     if (content !== undefined) { updates.push('content = ?'); values.push(content); }
     if (due_date !== undefined) { updates.push('due_date = ?'); values.push(due_date); }
-    if (target_grade !== undefined) { updates.push('target_grade = ?'); values.push(target_grade); }
-    if (target_class !== undefined) { updates.push('target_class = ?'); values.push(target_class); }
     if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
     values.push(req.params.id);
     await pool.execute(`UPDATE assignments SET ${updates.join(', ')} WHERE assignment_id = ?`, values);
@@ -157,6 +169,9 @@ app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/assignments/:id', authMiddleware, async (req, res) => {
   try {
+    const [rows] = await pool.execute('SELECT created_by FROM assignments WHERE assignment_id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
+    if (rows[0].created_by !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
     await pool.execute('DELETE FROM assignments WHERE assignment_id = ?', [req.params.id]);
     res.json({ success: true });
   } catch {
@@ -221,10 +236,27 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
 
 app.post('/api/messages', authMiddleware, async (req, res) => {
   try {
-    const { content, type, target_grade, target_class } = req.body;
-    if (!content || !type || !target_grade) return res.status(400).json({ error: '내용, 유형, 대상 학년은 필수입니다.' });
+    const { content, type } = req.body;
+    if (!content || !type) return res.status(400).json({ error: '내용과 유형은 필수입니다.' });
+    if (!['grade', 'class'].includes(type)) return res.status(400).json({ error: '메세지 유형이 올바르지 않습니다.' });
+    const user = await getCurrentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    const target_grade = user.grade;
+    const target_class = type === 'class' ? user.class_number : null;
     const [result] = await pool.execute('INSERT INTO messages (sender_id, content, type, target_grade, target_class) VALUES (?, ?, ?, ?, ?)', [req.user.id, content, type, target_grade, target_class || null]);
     res.json({ message_id: result.insertId, success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT sender_id FROM messages WHERE message_id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: '메세지를 찾을 수 없습니다.' });
+    if (rows[0].sender_id !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+    await pool.execute('DELETE FROM messages WHERE message_id = ?', [req.params.id]);
+    res.json({ success: true });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }

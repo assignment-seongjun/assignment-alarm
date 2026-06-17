@@ -37,25 +37,9 @@
           <label>마감일</label>
           <input type="date" id="taskDate" required>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>대상 학년</label>
-            <select id="targetGrade">
-              <option value="1">1학년</option>
-              <option value="2">2학년</option>
-              <option value="3">3학년</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>대상 반 (전체는 선택하지 않음)</label>
-            <select id="targetClass">
-              <option value="">전체</option>
-              <option value="1">1반</option>
-              <option value="2">2반</option>
-              <option value="3">3반</option>
-              <option value="4">4반</option>
-            </select>
-          </div>
+        <div class="form-group">
+          <label>등록 대상</label>
+          <input type="text" id="targetScope" readonly>
         </div>
         <div style="display:flex;gap:10px">
           <button class="btn btn-primary" id="saveBtn">등록하기</button>
@@ -70,25 +54,24 @@
     </div>
   </div>
 
-  <script src="js/api.js?v=2"></script>
+  <script src="js/api.js?v=4"></script>
   <script>
     API.requireAuth();
 
     async function init() {
-      const serverUser = await API.me();
-      if (serverUser && serverUser.user_id) {
-        API.setUser({ id: serverUser.user_id, email: serverUser.email, name: serverUser.name, grade: serverUser.grade, class_number: serverUser.class_number });
-      }
+      const user = await API.ensureUser();
+      if (!user) return;
       await API.loadUserInfo();
-      document.getElementById('taskDate').valueAsDate = new Date();
+      document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
+      document.getElementById('targetScope').value = `${user.grade}학년 ${user.class_number}반`;
       await loadMyAssignments();
     }
 
     async function loadMyAssignments() {
-      const user = API.getUser();
+      const user = await API.ensureUser();
       if (!user) return;
       const data = await API.getAssignments(user.grade, user.class_number);
-      const mine = data ? data.filter(a => a.created_by === user.id) : [];
+      const mine = data ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
       const container = document.getElementById('myAssignments');
       if (mine.length === 0) {
         container.innerHTML = '<div class="empty-state">등록한 과제가 없습니다.</div>';
@@ -111,18 +94,15 @@
       const title = document.getElementById('taskTitle').value.trim();
       const content = document.getElementById('taskContent').value.trim();
       const due_date = document.getElementById('taskDate').value;
-      const target_grade = parseInt(document.getElementById('targetGrade').value);
-      const targetClassEl = document.getElementById('targetClass');
-      const target_class = targetClassEl.value ? parseInt(targetClassEl.value) : null;
 
       if (!title || !due_date) { alert('과제명과 마감일을 입력해주세요.'); return; }
 
-      const res = await API.createAssignment({ title, content: content || null, due_date, target_grade, target_class });
+      const res = await API.createAssignment({ title, content: content || null, due_date });
       if (res && res.success) {
         alert('과제가 등록되었습니다.');
         document.getElementById('taskTitle').value = '';
         document.getElementById('taskContent').value = '';
-        document.getElementById('taskDate').valueAsDate = new Date();
+        document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
         loadMyAssignments();
       } else {
         alert(res?.error || '등록에 실패했습니다.');
@@ -132,7 +112,8 @@
     document.getElementById('myAssignments').addEventListener('click', async (e) => {
       if (e.target.classList.contains('delete-my')) {
         if (!confirm('정말 삭제하시겠습니까?')) return;
-        await API.deleteAssignment(parseInt(e.target.dataset.id));
+        const res = await API.deleteAssignment(parseInt(e.target.dataset.id));
+        if (!res || !res.success) { alert(res?.error || '삭제에 실패했습니다.'); return; }
         loadMyAssignments();
       }
     });

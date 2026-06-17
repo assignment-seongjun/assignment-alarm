@@ -33,10 +33,10 @@
 
 ```bash
 docker-compose up -d --build
-open http://localhost:70
+open http://localhost:3000
 ```
 
 ## 포트
 
-- Web: 70
+- Web: 3000
 - MySQL: 3307

@@ -6,6 +6,7 @@ COPY package.json package-lock.json* ./
 RUN npm install
 
 COPY server.js .
+COPY src ./src
 
 EXPOSE 80
 
