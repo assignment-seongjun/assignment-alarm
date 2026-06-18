@@ -53,8 +53,6 @@
         <textarea id="msgContent" placeholder="공지를 입력하세요..." rows="2"></textarea>
         <button class="btn btn-primary btn-sm" id="sendMsgBtn">보내기</button>
       </div>
-      <div class="admin-only-notice" id="messageAdminNotice" style="display:none">학년 공지와 반 공지는 관리자 계정만 보낼 수 있습니다.</div>
-
       <div id="messageList"><div class="empty-state">메세지가 없습니다.</div></div>
     </div>
   </div>
@@ -91,18 +89,15 @@
       const gradeSelect = document.getElementById('msgTargetGrade');
       const classSelect = document.getElementById('msgTargetClass');
       const form = document.getElementById('messageForm');
-      const notice = document.getElementById('messageAdminNotice');
 
       if (!user) return;
 
       if (!user.is_admin) {
         form.style.display = 'none';
-        notice.style.display = 'block';
         return;
       }
 
       form.style.display = 'flex';
-      notice.style.display = 'none';
 
       const currentType = typeSelect.value;
       const showGradeTarget = true;
