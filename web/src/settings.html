@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
-  <link rel="stylesheet" href="css/style.css?v=9">
+  <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 <body>
   <div class="app-shell">
@@ -68,10 +68,51 @@
         <button class="btn btn-secondary" onclick="API.logout()">로그아웃</button>
       </div>
 
-      <div class="settings-section" id="adminUserSection" style="display:none">
-        <h3>유저 관리</h3>
-        <p style="font-size:0.85rem;color:#666;margin-bottom:12px">관리자는 사용자 이름과 소속 학년/반을 수정하거나 계정을 삭제할 수 있습니다.</p>
-        <div id="adminUserList"><div class="empty-state">불러오는 중...</div></div>
+      <div class="settings-section admin-section" id="adminAssignmentSection" style="display:none">
+        <button class="admin-accordion-toggle open" type="button" data-target="adminAssignmentPanel">
+          <span>과제 관리</span>
+          <span class="admin-accordion-arrow">▾</span>
+        </button>
+        <div class="admin-accordion-panel show" id="adminAssignmentPanel">
+          <p class="admin-section-help">학년/반별 과제를 드롭다운으로 골라 확인하고 삭제할 수 있습니다.</p>
+          <div class="admin-filter-bar show admin-panel-filter">
+            <strong>과제 범위</strong>
+            <select id="adminSettingsAssignmentGrade"></select>
+            <select id="adminSettingsAssignmentClass"></select>
+          </div>
+          <div id="adminAssignmentList"><div class="empty-state">불러오는 중...</div></div>
+        </div>
+      </div>
+
+      <div class="settings-section admin-section" id="adminMessageSection" style="display:none">
+        <button class="admin-accordion-toggle" type="button" data-target="adminMessagePanel">
+          <span>메세지 관리</span>
+          <span class="admin-accordion-arrow">▾</span>
+        </button>
+        <div class="admin-accordion-panel" id="adminMessagePanel">
+          <p class="admin-section-help">학년 메세지와 반 메세지를 나눠서 보고 삭제할 수 있습니다.</p>
+          <div class="admin-filter-bar show admin-panel-filter">
+            <strong>메세지 범위</strong>
+            <select id="adminSettingsMessageType">
+              <option value="grade">학년 메세지</option>
+              <option value="class">반 메세지</option>
+            </select>
+            <select id="adminSettingsMessageGrade"></select>
+            <select id="adminSettingsMessageClass"></select>
+          </div>
+          <div id="adminMessageList"><div class="empty-state">불러오는 중...</div></div>
+        </div>
+      </div>
+
+      <div class="settings-section admin-section" id="adminUserSection" style="display:none">
+        <button class="admin-accordion-toggle" type="button" data-target="adminUserPanel">
+          <span>유저 관리</span>
+          <span class="admin-accordion-arrow">▾</span>
+        </button>
+        <div class="admin-accordion-panel" id="adminUserPanel">
+          <p class="admin-section-help">사용자 이름과 소속 학년/반을 수정하거나 계정을 삭제할 수 있습니다.</p>
+          <div id="adminUserList"><div class="empty-state">불러오는 중...</div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -81,6 +122,16 @@
   <script>
     API.requireAuth();
 
+    const adminSettingsState = {
+      assignmentGrade: 'all',
+      assignmentClass: 'all',
+      messageType: 'grade',
+      messageGrade: 'all',
+      messageClass: 'all',
+      assignments: [],
+      messages: []
+    };
+
     async function init() {
       const user = await API.ensureUser();
       if (!user) return;
@@ -88,8 +139,15 @@
       await API.initNotifications();
       await loadProfile();
       if (user.is_admin) {
+        document.getElementById('adminAssignmentSection').style.display = 'block';
+        document.getElementById('adminMessageSection').style.display = 'block';
         document.getElementById('adminUserSection').style.display = 'block';
-        await loadAdminUsers();
+        initAdminSelectors();
+        await Promise.all([
+          loadAdminAssignments(),
+          loadAdminMessages(),
+          loadAdminUsers()
+        ]);
       }
     }
 
@@ -134,6 +192,105 @@
         const optionValue = i + 1;
         return `<option value="${optionValue}"${Number(value) === optionValue ? ' selected' : ''}>${optionValue}${suffix}</option>`;
       }).join('');
+    }
+
+    function buildFilterOptions(max, suffix, selectedValue, allLabel) {
+      return [`<option value="all"${selectedValue === 'all' ? ' selected' : ''}>${allLabel}</option>`]
+        .concat(Array.from({ length: max }, (_, i) => {
+          const optionValue = String(i + 1);
+          return `<option value="${optionValue}"${selectedValue === optionValue ? ' selected' : ''}>${optionValue}${suffix}</option>`;
+        }))
+        .join('');
+    }
+
+    function initAdminSelectors() {
+      document.getElementById('adminSettingsAssignmentGrade').innerHTML = buildFilterOptions(6, '학년', adminSettingsState.assignmentGrade, '전체 학년');
+      document.getElementById('adminSettingsAssignmentClass').innerHTML = buildFilterOptions(30, '반', adminSettingsState.assignmentClass, '전체 반');
+      document.getElementById('adminSettingsMessageGrade').innerHTML = buildFilterOptions(6, '학년', adminSettingsState.messageGrade, '전체 학년');
+      document.getElementById('adminSettingsMessageClass').innerHTML = buildFilterOptions(30, '반', adminSettingsState.messageClass, '전체 반');
+      document.getElementById('adminSettingsMessageType').value = adminSettingsState.messageType;
+      syncAdminMessageSelectors();
+    }
+
+    function syncAdminMessageSelectors() {
+      const classSelect = document.getElementById('adminSettingsMessageClass');
+      classSelect.style.display = adminSettingsState.messageType === 'class' ? 'block' : 'none';
+    }
+
+    function getVisibleAdminAssignments() {
+      return adminSettingsState.assignments.filter(assignment => {
+        const gradeMatch = adminSettingsState.assignmentGrade === 'all' || String(assignment.target_grade) === adminSettingsState.assignmentGrade;
+        const classMatch = adminSettingsState.assignmentClass === 'all' || String(assignment.target_class) === adminSettingsState.assignmentClass;
+        return gradeMatch && classMatch;
+      });
+    }
+
+    function getVisibleAdminMessages() {
+      return adminSettingsState.messages.filter(message => {
+        const gradeMatch = adminSettingsState.messageGrade === 'all' || String(message.target_grade) === adminSettingsState.messageGrade;
+        if (!gradeMatch) return false;
+        if (adminSettingsState.messageType === 'grade') return true;
+        return adminSettingsState.messageClass === 'all' || String(message.target_class) === adminSettingsState.messageClass;
+      });
+    }
+
+    function renderAdminAssignments() {
+      const container = document.getElementById('adminAssignmentList');
+      const assignments = getVisibleAdminAssignments();
+      if (assignments.length === 0) {
+        container.innerHTML = '<div class="empty-state">선택한 범위의 과제가 없습니다.</div>';
+        return;
+      }
+
+      container.innerHTML = assignments.map(assignment => `
+        <div class="assignment-item">
+          <div class="info">
+            <div class="title">${API.escapeHTML(assignment.title)}</div>
+            <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-danger btn-sm delete-admin-assignment" data-id="${assignment.assignment_id}">삭제</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderAdminMessages() {
+      const container = document.getElementById('adminMessageList');
+      const messages = getVisibleAdminMessages();
+      if (messages.length === 0) {
+        container.innerHTML = '<div class="empty-state">선택한 범위의 메세지가 없습니다.</div>';
+        return;
+      }
+
+      container.innerHTML = messages.map(message => {
+        const badge = message.type === 'grade' ? '<span class="msg-badge grade">학년</span>' : '<span class="msg-badge class">반</span>';
+        return `
+          <div class="message-item">
+            <div class="msg-header">
+              <span class="msg-sender">${API.escapeHTML(message.sender_name)} ${badge}</span>
+              <span class="msg-time">${new Date(message.created_at).toLocaleString('ko-KR')}</span>
+            </div>
+            <div class="msg-content">${API.escapeHTML(message.content)}</div>
+            <div class="msg-time" style="margin-top:6px">${message.type === 'grade' ? `${message.target_grade}학년` : `${message.target_grade}학년 ${message.target_class}반`}</div>
+            <div class="actions" style="margin-top:10px">
+              <button class="btn btn-danger btn-sm delete-admin-message" data-id="${message.message_id}">삭제</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadAdminAssignments() {
+      const res = await API.getAssignments();
+      adminSettingsState.assignments = Array.isArray(res) ? res : [];
+      renderAdminAssignments();
+    }
+
+    async function loadAdminMessages() {
+      const res = await API.getMessages(null, null, adminSettingsState.messageType);
+      adminSettingsState.messages = Array.isArray(res) ? res : [];
+      renderAdminMessages();
     }
 
     async function loadAdminUsers() {
@@ -226,6 +383,64 @@
         }
         await loadAdminUsers();
       }
+    });
+
+    document.getElementById('adminAssignmentList').addEventListener('click', async (e) => {
+      if (!e.target.classList.contains('delete-admin-assignment')) return;
+      if (!confirm('정말 이 과제를 삭제하시겠습니까?')) return;
+      const res = await API.deleteAssignment(parseInt(e.target.dataset.id, 10));
+      if (!res || res.error) {
+        alert(res?.error || '과제 삭제에 실패했습니다.');
+        return;
+      }
+      await loadAdminAssignments();
+      await API.refreshNotifications();
+    });
+
+    document.getElementById('adminMessageList').addEventListener('click', async (e) => {
+      if (!e.target.classList.contains('delete-admin-message')) return;
+      if (!confirm('정말 이 메세지를 삭제하시겠습니까?')) return;
+      const res = await API.deleteMessage(parseInt(e.target.dataset.id, 10));
+      if (!res || res.error) {
+        alert(res?.error || '메세지 삭제에 실패했습니다.');
+        return;
+      }
+      await loadAdminMessages();
+      await API.refreshNotifications();
+    });
+
+    document.querySelectorAll('.admin-accordion-toggle').forEach(button => {
+      button.addEventListener('click', () => {
+        const panel = document.getElementById(button.dataset.target);
+        const isOpen = button.classList.toggle('open');
+        panel.classList.toggle('show', isOpen);
+      });
+    });
+
+    document.getElementById('adminSettingsAssignmentGrade').addEventListener('change', (e) => {
+      adminSettingsState.assignmentGrade = e.target.value;
+      renderAdminAssignments();
+    });
+
+    document.getElementById('adminSettingsAssignmentClass').addEventListener('change', (e) => {
+      adminSettingsState.assignmentClass = e.target.value;
+      renderAdminAssignments();
+    });
+
+    document.getElementById('adminSettingsMessageType').addEventListener('change', async (e) => {
+      adminSettingsState.messageType = e.target.value;
+      syncAdminMessageSelectors();
+      await loadAdminMessages();
+    });
+
+    document.getElementById('adminSettingsMessageGrade').addEventListener('change', (e) => {
+      adminSettingsState.messageGrade = e.target.value;
+      renderAdminMessages();
+    });
+
+    document.getElementById('adminSettingsMessageClass').addEventListener('change', (e) => {
+      adminSettingsState.messageClass = e.target.value;
+      renderAdminMessages();
     });
 
     init();
