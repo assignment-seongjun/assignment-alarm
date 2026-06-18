@@ -7,12 +7,12 @@ a { text-decoration: none; color: inherit; }
 .app-shell { min-height: 100dvh; background: #f0f2f5; }
 
 /* Layout */
-.app-header { background: #1a1a2e; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
-.app-header h1 { font-size: 1.5rem; cursor: pointer; }
-.app-header nav { display: flex; gap: 20px; align-items: center; }
+.app-header { background: #1a1a2e; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; gap: 20px; }
+.app-header h1 { font-size: 1.5rem; cursor: pointer; flex: 0 0 auto; }
+.app-header nav { display: flex; gap: 20px; align-items: center; justify-content: center; flex: 1 1 auto; }
 .app-header nav a { color: rgba(255,255,255,0.8); font-size: 0.9rem; padding: 5px 10px; border-radius: 6px; transition: all 0.2s; }
 .app-header nav a:hover, .app-header nav a.active { background: rgba(255,255,255,0.15); color: white; }
-.app-header .user-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: rgba(255,255,255,0.7); }
+.app-header .user-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: rgba(255,255,255,0.7); flex: 0 0 auto; }
 .app-header .user-info .user-name { color: white; font-weight: 600; }
 .app-header .logout-btn { background: none; border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.8); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
 .app-header .logout-btn:hover { background: rgba(255,255,255,0.1); }
@@ -155,7 +155,7 @@ a { text-decoration: none; color: inherit; }
 .admin-filter-bar select { min-width: 120px; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.95rem; background: white; }
 
 /* Auth pages */
-.auth-page { display: flex; justify-content: center; align-items: center; min-height: 100%; padding: 20px; }
+.auth-page { display: flex; justify-content: center; align-items: flex-start; min-height: 100dvh; padding: 72px 20px 32px; }
 .auth-box { background: white; border-radius: 20px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
 .auth-box h1 { text-align: center; color: #1a1a2e; margin-bottom: 5px; }
 .auth-box p { text-align: center; color: #666; margin-bottom: 25px; }
@@ -185,7 +185,7 @@ a { text-decoration: none; color: inherit; }
 
 @media (max-width: 900px) {
   .app-header { flex-wrap: wrap; gap: 12px; }
-  .app-header nav { order: 3; width: 100%; flex-wrap: wrap; gap: 10px; }
+  .app-header nav { order: 3; width: 100%; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .app-header .user-info { margin-left: auto; }
 }
 
@@ -195,4 +195,6 @@ a { text-decoration: none; color: inherit; }
   .admin-user-grid { grid-template-columns: 1fr; }
   .admin-filter-bar { align-items: stretch; }
   .admin-filter-bar select { width: 100%; }
+  .auth-page { padding-top: 56px; }
+  .auth-box { padding: 32px 24px; }
 }
