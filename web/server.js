@@ -458,51 +458,11 @@ app.get('/api/public-config', (_req, res) => {
 });
 
 app.post('/api/auth/register', authRateLimit, async (req, res) => {
-  try {
-    const name = normalizeName(req.body.name);
-    const password = String(req.body.password || '');
-    const grade = parseInteger(req.body.grade);
-    const class_number = parseInteger(req.body.class_number);
-    const turnstileToken = String(req.body.turnstileToken || '');
-    if (!password || !name || !grade || !class_number) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
-    if (name.length < 2 || name.length > 30) return res.status(400).json({ error: '이름은 2자 이상 30자 이하로 입력해주세요.' });
-    if (password.length < 8 || password.length > 72) return res.status(400).json({ error: '비밀번호는 8자 이상 72자 이하로 입력해주세요.' });
-    if (grade < 1 || grade > MAX_GRADE || class_number < 1 || class_number > MAX_CLASS) return res.status(400).json({ error: '학년 또는 반 값이 올바르지 않습니다.' });
-    if (TURNSTILE_ENABLED) {
-      const verification = await verifyTurnstileToken(turnstileToken, req.ip || req.socket.remoteAddress || '');
-      if (!verification.success) {
-        return res.status(400).json({ error: '캡차 확인에 실패했습니다. 다시 시도해주세요.' });
-      }
-    }
-    const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [name]);
-    if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
-    const hash = await bcrypt.hash(password, 10);
-    const [result] = await pool.execute('INSERT INTO users (password, name, grade, class_number) VALUES (?, ?, ?, ?)', [hash, name, grade, class_number]);
-    const user = { id: result.insertId, name, grade, class_number };
-    setAuthCookie(res, createToken(user));
-    clearAuthRateLimit(req);
-    res.json({ user });
-  } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
+  return res.status(403).json({ error: '구글 로그인으로만 가입할 수 있습니다.' });
 });
 
 app.post('/api/auth/login', authRateLimit, async (req, res) => {
-  try {
-    const name = normalizeName(req.body.name);
-    const password = String(req.body.password || '');
-    if (!name || !password) return res.status(400).json({ error: '이름과 비밀번호를 입력해주세요.' });
-    const [rows] = await pool.execute('SELECT * FROM users WHERE name = ? LIMIT 1', [name]);
-    if (rows.length === 0) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
-    const user = rows[0];
-    if (!await bcrypt.compare(password, user.password)) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
-    setAuthCookie(res, createToken(user));
-    clearAuthRateLimit(req);
-    res.json({ user: { id: user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled, is_admin: user.is_admin } });
-  } catch {
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
+  return res.status(403).json({ error: '구글 로그인만 사용할 수 있습니다.' });
 });
 
 app.post('/api/auth/google', authRateLimit, async (req, res) => {
