@@ -123,14 +123,14 @@
       document.getElementById('googleDomainHint').style.display = 'block';
       api.initialize({
         client_id: googleClientId,
+        ux_mode: 'popup',
         callback: async (response) => {
           if (!response?.credential) {
             showError('구글 인증 결과를 가져오지 못했습니다.');
             return;
           }
           await handleGoogleCredential(response.credential);
-        },
-        use_fedcm_for_prompt: true
+        }
       });
       api.renderButton(
         document.getElementById('googleLoginButton'),
