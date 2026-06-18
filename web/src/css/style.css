@@ -140,6 +140,7 @@ a { text-decoration: none; color: inherit; }
 .auth-box .auth-link a { color: #3498db; font-weight: 600; cursor: pointer; }
 .auth-box .auth-link a:hover { text-decoration: underline; }
 .auth-error { background: #ffe0e0; color: #e74c3c; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem; display: none; }
+.turnstile-wrap { display: none; justify-content: center; margin: 4px 0 16px; overflow-x: auto; }
 
 /* Login page */
 .login-page .app-header { display: none; }

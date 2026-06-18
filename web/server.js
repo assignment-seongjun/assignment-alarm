@@ -9,6 +9,9 @@ const app = express();
 const PORT = Number(process.env.PORT) || 80;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const JWT_SECRET = process.env.JWT_SECRET || (!IS_PRODUCTION ? crypto.randomBytes(32).toString('hex') : null);
+const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
+const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const AUTH_COOKIE_NAME = 'assignment_alarm_session';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -199,6 +202,34 @@ async function getCurrentUser(userId) {
   return rows[0] || null;
 }
 
+async function verifyTurnstileToken(token, remoteIp) {
+  if (!TURNSTILE_ENABLED) return { success: true };
+  if (!token) return { success: false, error: 'missing-input-response' };
+
+  const params = new URLSearchParams({
+    secret: TURNSTILE_SECRET_KEY,
+    response: String(token)
+  });
+
+  if (remoteIp) {
+    params.set('remoteip', remoteIp);
+  }
+
+  const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: params
+  });
+
+  if (!response.ok) {
+    throw new Error(`Turnstile verification failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
 async function migrateSchema(conn) {
   const [emailColumns] = await conn.execute(
     `SELECT COLUMN_NAME
@@ -241,16 +272,27 @@ async function migrateSchema(conn) {
 }
 
 // Auth
+app.get('/api/public-config', (_req, res) => {
+  res.json({ turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : null });
+});
+
 app.post('/api/auth/register', authRateLimit, async (req, res) => {
   try {
     const name = normalizeName(req.body.name);
     const password = String(req.body.password || '');
     const grade = parseInteger(req.body.grade);
     const class_number = parseInteger(req.body.class_number);
+    const turnstileToken = String(req.body.turnstileToken || '');
     if (!password || !name || !grade || !class_number) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
     if (name.length < 2 || name.length > 30) return res.status(400).json({ error: '이름은 2자 이상 30자 이하로 입력해주세요.' });
     if (password.length < 8 || password.length > 72) return res.status(400).json({ error: '비밀번호는 8자 이상 72자 이하로 입력해주세요.' });
     if (grade < 1 || grade > 6 || class_number < 1 || class_number > 30) return res.status(400).json({ error: '학년 또는 반 값이 올바르지 않습니다.' });
+    if (TURNSTILE_ENABLED) {
+      const verification = await verifyTurnstileToken(turnstileToken, req.ip || req.socket.remoteAddress || '');
+      if (!verification.success) {
+        return res.status(400).json({ error: '캡차 확인에 실패했습니다. 다시 시도해주세요.' });
+      }
+    }
     const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [name]);
     if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
     const hash = await bcrypt.hash(password, 10);

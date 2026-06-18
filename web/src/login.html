@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 로그인</title>
-  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="stylesheet" href="css/style.css?v=7">
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
 <body class="login-page">
   <div class="app-shell">
@@ -60,6 +61,9 @@
             </select>
           </div>
         </div>
+        <div class="turnstile-wrap" id="turnstileWrap">
+          <div id="turnstileWidget"></div>
+        </div>
         <button class="btn btn-primary" style="width:100%" id="registerBtn">회원가입</button>
         <div class="auth-link">이미 계정이 있으신가요? <a id="goToLogin">로그인</a></div>
       </div>
@@ -67,8 +71,11 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=6"></script>
+  <script src="js/api.js?v=7"></script>
   <script>
+    let turnstileSiteKey = null;
+    let turnstileWidgetId = null;
+
     function showError(msg) {
       const el = document.getElementById('authError');
       el.textContent = msg;
@@ -79,16 +86,64 @@
       document.getElementById('authError').style.display = 'none';
     }
 
-    document.getElementById('goToRegister').addEventListener('click', () => {
+    function showRegisterForm() {
       hideError();
       document.getElementById('loginForm').style.display = 'none';
       document.getElementById('registerForm').style.display = 'block';
-    });
+      renderTurnstileIfNeeded();
+    }
 
-    document.getElementById('goToLogin').addEventListener('click', () => {
+    function showLoginForm() {
       hideError();
       document.getElementById('registerForm').style.display = 'none';
       document.getElementById('loginForm').style.display = 'block';
+    }
+
+    function getTurnstileApi() {
+      return window.turnstile || null;
+    }
+
+    function resetTurnstile() {
+      const api = getTurnstileApi();
+      if (!api || turnstileWidgetId === null) return;
+      api.reset(turnstileWidgetId);
+    }
+
+    function renderTurnstileIfNeeded() {
+      const wrap = document.getElementById('turnstileWrap');
+      if (!turnstileSiteKey || !wrap) return;
+
+      wrap.style.display = 'flex';
+      if (turnstileWidgetId !== null) return;
+
+      const api = getTurnstileApi();
+      if (!api) {
+        window.setTimeout(renderTurnstileIfNeeded, 200);
+        return;
+      }
+
+      turnstileWidgetId = api.render('#turnstileWidget', {
+        sitekey: turnstileSiteKey,
+        theme: 'light'
+      });
+    }
+
+    async function loadPublicConfig() {
+      const config = await API.publicConfig();
+      if (config && config.turnstileSiteKey) {
+        turnstileSiteKey = config.turnstileSiteKey;
+        if (document.getElementById('registerForm').style.display !== 'none') {
+          renderTurnstileIfNeeded();
+        }
+      }
+    }
+
+    document.getElementById('goToRegister').addEventListener('click', () => {
+      showRegisterForm();
+    });
+
+    document.getElementById('goToLogin').addEventListener('click', () => {
+      showLoginForm();
     });
 
     document.getElementById('loginBtn').addEventListener('click', async () => {
@@ -115,8 +170,18 @@
       if (!data.name || !data.password || !passwordConfirm) { showError('모든 필드를 입력해주세요.'); return; }
       if (data.password.length < 8) { showError('비밀번호는 8자 이상 입력해주세요.'); return; }
       if (data.password !== passwordConfirm) { showError('비밀번호 확인이 일치하지 않습니다.'); return; }
+      if (turnstileSiteKey) {
+        const api = getTurnstileApi();
+        const token = api && turnstileWidgetId !== null ? api.getResponse(turnstileWidgetId) : '';
+        if (!token) { showError('캡차 확인을 완료해주세요.'); return; }
+        data.turnstileToken = token;
+      }
       const res = await API.register(data);
-      if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
+      if (!res || res.error) {
+        resetTurnstile();
+        showError(res?.error || '서버 연결에 실패했습니다.');
+        return;
+      }
       API.setUser(res.user);
       window.location.href = 'calendar.html';
     });
@@ -134,6 +199,8 @@
         window.location.href = 'calendar.html';
       }
     }).catch(() => {});
+
+    loadPublicConfig().catch(() => {});
   </script>
 </body>
 </html>

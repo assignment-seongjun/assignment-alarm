@@ -79,6 +79,7 @@ const API = {
   register(data) { return this.post('/api/auth/register', data); },
   me() { return this.get('/api/auth/me'); },
   logoutRequest() { return this.post('/api/auth/logout'); },
+  publicConfig() { return this.get('/api/public-config'); },
 
   normalizeUser(u) {
     if (!u) return null;
