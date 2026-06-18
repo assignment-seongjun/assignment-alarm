@@ -15,9 +15,17 @@ const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
 const GOOGLE_ALLOWED_DOMAIN = 'bssm.hs.kr';
-const ADMIN_GOOGLE_EMAIL = process.env.ADMIN_GOOGLE_EMAIL
-  ? String(process.env.ADMIN_GOOGLE_EMAIL).trim().toLowerCase()
-  : (process.env.ADMIN_EMAIL ? String(process.env.ADMIN_EMAIL).trim().toLowerCase() : null);
+const ADMIN_GOOGLE_EMAILS = Array.from(new Set(
+  String(
+    process.env.ADMIN_GOOGLE_EMAILS
+    || process.env.ADMIN_GOOGLE_EMAIL
+    || process.env.ADMIN_EMAIL
+    || ''
+  )
+    .split(/[,\n]/)
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+));
 const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim() : null;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
 const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
@@ -194,7 +202,7 @@ function normalizeBooleanFlag(value) {
 }
 
 function isAdminEmail(email) {
-  return Boolean(ADMIN_GOOGLE_EMAIL && String(email || '').trim().toLowerCase() === ADMIN_GOOGLE_EMAIL);
+  return ADMIN_GOOGLE_EMAILS.includes(String(email || '').trim().toLowerCase());
 }
 
 function isAdminUser(user) {
@@ -409,11 +417,15 @@ async function migrateSchema(conn) {
 }
 
 async function seedAdminAccount(conn) {
-  if (ADMIN_GOOGLE_EMAIL) {
-    const [googleRows] = await conn.execute('SELECT user_id FROM users WHERE google_email = ? LIMIT 1', [ADMIN_GOOGLE_EMAIL]);
-    if (googleRows.length > 0) {
-      await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [googleRows[0].user_id]);
-      console.log(`Admin account synced by email: ${ADMIN_GOOGLE_EMAIL}`);
+  if (ADMIN_GOOGLE_EMAILS.length > 0) {
+    const placeholders = ADMIN_GOOGLE_EMAILS.map(() => '?').join(', ');
+    const [googleRows] = await conn.execute(
+      `SELECT user_id, google_email FROM users WHERE google_email IN (${placeholders})`,
+      ADMIN_GOOGLE_EMAILS
+    );
+    for (const row of googleRows) {
+      await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [row.user_id]);
+      console.log(`Admin account synced by email: ${row.google_email}`);
     }
   }
 
