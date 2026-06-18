@@ -153,7 +153,7 @@ a { text-decoration: none; color: inherit; }
 .admin-filter-bar select { min-width: 120px; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.95rem; background: white; }
 
 /* Auth pages */
-.auth-page { display: flex; justify-content: center; align-items: flex-start; min-height: 100dvh; padding: 72px 20px 32px; }
+.auth-page { display: flex; justify-content: center; align-items: center; min-height: 100dvh; padding: 32px 20px; }
 .auth-box { background: white; border-radius: 20px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
 .auth-box h1 { text-align: center; color: #1a1a2e; margin-bottom: 5px; }
 .auth-box p { text-align: center; color: #666; margin-bottom: 25px; }
@@ -197,6 +197,6 @@ a { text-decoration: none; color: inherit; }
   .admin-user-grid { grid-template-columns: 1fr; }
   .admin-filter-bar { align-items: stretch; }
   .admin-filter-bar select { width: 100%; }
-  .auth-page { padding-top: 56px; }
+  .auth-page { align-items: center; padding: 24px 16px; }
   .auth-box { padding: 32px 24px; }
 }
