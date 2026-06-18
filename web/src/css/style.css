@@ -7,12 +7,12 @@ a { text-decoration: none; color: inherit; }
 .app-shell { min-height: 100dvh; background: #f0f2f5; }
 
 /* Layout */
-.app-header { background: #1a1a2e; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; gap: 20px; }
-.app-header h1 { font-size: 1.5rem; cursor: pointer; flex: 0 0 auto; }
-.app-header nav { display: flex; gap: 20px; align-items: center; justify-content: center; flex: 1 1 auto; }
+.app-header { background: #1a1a2e; color: white; padding: 15px 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; position: sticky; top: 0; z-index: 100; gap: 20px; }
+.app-header h1 { font-size: 1.5rem; cursor: pointer; justify-self: start; }
+.app-header nav { display: flex; gap: 20px; align-items: center; justify-content: center; justify-self: center; }
 .app-header nav a { color: rgba(255,255,255,0.8); font-size: 0.9rem; padding: 5px 10px; border-radius: 6px; transition: all 0.2s; }
 .app-header nav a:hover, .app-header nav a.active { background: rgba(255,255,255,0.15); color: white; }
-.app-header .user-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: rgba(255,255,255,0.7); flex: 0 0 auto; }
+.app-header .user-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: rgba(255,255,255,0.7); justify-self: end; }
 .app-header .user-info .user-name { color: white; font-weight: 600; }
 .app-header .logout-btn { background: none; border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.8); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
 .app-header .logout-btn:hover { background: rgba(255,255,255,0.1); }
@@ -186,7 +186,7 @@ a { text-decoration: none; color: inherit; }
 .completed-badge { color: #2ecc71; font-size: 1.2rem; }
 
 @media (max-width: 900px) {
-  .app-header { flex-wrap: wrap; gap: 12px; }
+  .app-header { display: flex; flex-wrap: wrap; gap: 12px; }
   .app-header nav { order: 3; width: 100%; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .app-header .user-info { margin-left: auto; }
 }
