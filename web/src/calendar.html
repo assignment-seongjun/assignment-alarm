@@ -186,7 +186,7 @@
             </div>
             <div class="actions">
               ${!a.is_completed && !(user && user.is_admin) ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}
-              ${user && a.created_by === user.id ? `<button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>` : ''}
+              ${user && (a.created_by === user.id || user.is_admin) ? `<button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>` : ''}
             </div>
           </div>`;
         });

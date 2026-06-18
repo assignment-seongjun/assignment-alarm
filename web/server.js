@@ -618,7 +618,9 @@ app.delete('/api/assignments/:id', authMiddleware, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT created_by FROM assignments WHERE assignment_id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
-    if (rows[0].created_by !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+    const user = await getCurrentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (rows[0].created_by !== req.user.id && !isAdminUser(user)) return res.status(403).json({ error: '권한이 없습니다.' });
     await pool.execute('DELETE FROM assignments WHERE assignment_id = ?', [req.params.id]);
     res.json({ success: true });
   } catch {

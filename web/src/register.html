@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 과제 등록</title>
-  <link rel="stylesheet" href="css/style.css?v=9">
+  <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
   <div class="app-shell">
@@ -62,7 +62,7 @@
     </div>
 
     <div class="card">
-      <h3>내가 등록한 과제</h3>
+      <h3 id="assignmentListTitle">내가 등록한 과제</h3>
       <div id="myAssignments"><div class="empty-state">등록한 과제가 없습니다.</div></div>
     </div>
   </div>
@@ -78,7 +78,8 @@
       await API.loadUserInfo();
       await API.initNotifications();
       document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
-      document.getElementById('targetScope').value = `${user.grade}학년 ${user.class_number}반`;
+      document.getElementById('targetScope').value = user.is_admin ? '관리자는 등록 시 본인 학년/반 과제로 등록됩니다.' : `${user.grade}학년 ${user.class_number}반`;
+      document.getElementById('assignmentListTitle').textContent = user.is_admin ? '전체 과제 관리' : '내가 등록한 과제';
       await loadMyAssignments();
     }
 
@@ -86,17 +87,17 @@
       const user = await API.ensureUser();
       if (!user) return;
       const data = await API.getAssignments(user.grade, user.class_number);
-      const mine = data ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
+      const visibleAssignments = user.is_admin ? (data || []) : data ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
       const container = document.getElementById('myAssignments');
-      if (mine.length === 0) {
-        container.innerHTML = '<div class="empty-state">등록한 과제가 없습니다.</div>';
+      if (visibleAssignments.length === 0) {
+        container.innerHTML = `<div class="empty-state">${user.is_admin ? '등록된 과제가 없습니다.' : '등록한 과제가 없습니다.'}</div>`;
         return;
       }
-      container.innerHTML = mine.map(a => `
+      container.innerHTML = visibleAssignments.map(a => `
         <div class="assignment-item">
           <div class="info">
             <div class="title">${API.escapeHTML(a.title)}</div>
-            <div class="meta">${API.escapeHTML(a.due_date)} · ${API.escapeHTML(a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체')}</div>
+            <div class="meta">${API.escapeHTML(a.due_date)} · ${API.escapeHTML(a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체')} · ${API.escapeHTML(a.creator_name || '')}</div>
           </div>
           <div class="actions">
             <button class="btn btn-danger btn-sm delete-my" data-id="${a.assignment_id}">삭제</button>
