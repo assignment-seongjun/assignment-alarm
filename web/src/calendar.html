@@ -222,6 +222,7 @@
           html += `<div class="assignment-item${a.is_completed ? ' done' : ''}">
             <div class="info">
               <div class="title">${API.escapeHTML(a.title)}</div>
+              ${a.content ? `<div class="detail">${API.escapeHTML(a.content)}</div>` : ''}
               <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${user && user.is_admin ? `${a.target_grade}학년 ${a.target_class}반` : a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
             </div>
             <div class="actions">

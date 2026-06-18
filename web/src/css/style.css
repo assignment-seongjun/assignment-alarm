@@ -176,6 +176,7 @@ a { text-decoration: none; color: inherit; }
 .assignment-item:last-child { border-bottom: none; }
 .assignment-item .info { flex: 1; }
 .assignment-item .info .title { font-weight: 600; color: #333; }
+.assignment-item .info .detail { margin-top: 6px; font-size: 0.9rem; color: #555; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .assignment-item .info .meta { font-size: 0.8rem; color: #999; margin-top: 3px; }
 .assignment-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
 .assignment-item.done .title { text-decoration: line-through; color: #999; }

@@ -246,6 +246,7 @@
         <div class="assignment-item">
           <div class="info">
             <div class="title">${API.escapeHTML(assignment.title)}</div>
+            ${assignment.content ? `<div class="detail">${API.escapeHTML(assignment.content)}</div>` : ''}
             <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
           </div>
           <div class="actions">
