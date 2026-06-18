@@ -4,13 +4,13 @@ services:
       context: ./mysql
       dockerfile: Dockerfile
     container_name: assignment-mysql
-    ports:
-      - "3307:3306"
+    expose:
+      - "3306"
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: assignment_alarm
-      MYSQL_USER: user
-      MYSQL_PASSWORD: userpassword
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-assignment_alarm}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - ./mysql/data:/var/lib/mysql
       - ./mysql/conf:/etc/mysql/conf.d
@@ -28,6 +28,14 @@ services:
       - "3000:80"
     volumes:
       - ./web/src:/app/src
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      JWT_SECRET: ${JWT_SECRET}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE:-assignment_alarm}
     networks:
       - app-network
     depends_on:

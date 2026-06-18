@@ -1,8 +1,12 @@
 const API = {
   currentUser: null,
-  getToken() { return localStorage.getItem('token'); },
-  setToken(t) { localStorage.setItem('token', t); },
-  clearToken() { localStorage.removeItem('token'); },
+  getToken() { return null; },
+  setToken() {
+    localStorage.removeItem('token');
+  },
+  clearToken() {
+    localStorage.removeItem('token');
+  },
   getUser() {
     try {
       return this.normalizeUser(this.currentUser || JSON.parse(localStorage.getItem('user') || 'null'));
@@ -29,20 +33,35 @@ const API = {
       .replace(/'/g, '&#39;');
   },
 
+  isLoginPage() {
+    return window.location.pathname.endsWith('/login.html') || window.location.pathname === '/' || window.location.pathname === '';
+  },
+
+  isSafeImageUrl(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(String(value), window.location.origin);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  },
+
   async request(method, url, body) {
     const headers = { 'Content-Type': 'application/json' };
-    const hadToken = !!this.getToken();
-    const token = this.getToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(url, {
+      method,
+      headers,
+      credentials: 'same-origin',
+      body: body ? JSON.stringify(body) : undefined
+    });
     if (res.status === 401) {
-      if (hadToken) {
-        this.clearToken();
-        this.clearUser();
+      this.clearToken();
+      this.clearUser();
+      if (!this.isLoginPage()) {
         window.location.href = 'login.html';
-        return { error: '인증이 만료되었습니다.' };
       }
-      return res.json();
+      return { error: '인증이 만료되었습니다.' };
     }
     return res.json();
   },
@@ -55,6 +74,7 @@ const API = {
   login(name, password) { return this.post('/api/auth/login', { name, password }); },
   register(data) { return this.post('/api/auth/register', data); },
   me() { return this.get('/api/auth/me'); },
+  logoutRequest() { return this.post('/api/auth/logout'); },
 
   normalizeUser(u) {
     if (!u) return null;
@@ -69,12 +89,6 @@ const API = {
   },
 
   async ensureUser() {
-    const cached = this.normalizeUser(this.getUser());
-    if (cached && cached.id && cached.grade && cached.class_number) {
-      this.setUser(cached);
-      return cached;
-    }
-
     const serverUser = await this.me();
     const user = this.normalizeUser(serverUser);
     if (user && user.id && user.grade && user.class_number) {
@@ -88,22 +102,20 @@ const API = {
     return null;
   },
 
-  getAssignments(grade, cls) { return this.get(`/api/assignments?grade=${encodeURIComponent(grade)}&class=${encodeURIComponent(cls || '')}`); },
+  getAssignments() { return this.get('/api/assignments'); },
   createAssignment(data) { return this.post('/api/assignments', data); },
   updateAssignment(id, data) { return this.put(`/api/assignments/${id}`, data); },
   deleteAssignment(id) { return this.del(`/api/assignments/${id}`); },
 
   getUserAssignments(userId) { return this.get(`/api/user-assignments/${userId}`); },
   toggleAssignment(assignmentId, completed) { return this.put('/api/user-assignments', { assignment_id: assignmentId, is_completed: completed }); },
-  getUserAssignmentsWithDetails(userId, grade, cls) { return this.get(`/api/users/${userId}/assignments?grade=${encodeURIComponent(grade)}&class=${encodeURIComponent(cls || '')}`); },
+  getUserAssignmentsWithDetails(userId) { return this.get(`/api/users/${userId}/assignments`); },
 
-  getMessages(grade, cls, type) {
-    const params = new URLSearchParams({
-      grade: String(grade),
-      class: String(cls || '')
-    });
+  getMessages(_grade, _cls, type) {
+    const params = new URLSearchParams();
     if (type) params.set('type', type);
-    return this.get(`/api/messages?${params.toString()}`);
+    const query = params.toString();
+    return this.get(query ? `/api/messages?${query}` : '/api/messages');
   },
   sendMessage(data) { return this.post('/api/messages', data); },
   deleteMessage(id) { return this.del(`/api/messages/${id}`); },
@@ -247,14 +259,15 @@ const API = {
   },
 
   async refreshNotifications() {},
-  logout() {
+  async logout() {
+    await this.logoutRequest();
     this.clearToken();
     this.clearUser();
     window.location.href = 'login.html';
   },
 
   requireAuth() {
-    if (!this.getToken()) window.location.href = 'login.html';
+    this.clearToken();
   },
 
   async loadUserInfo() {

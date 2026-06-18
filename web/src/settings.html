@@ -91,8 +91,16 @@
       document.getElementById('settingClass').value = `${data.grade}학년 ${data.class_number}반`;
 
       const avatar = document.getElementById('profileAvatar');
-      if (data.profile_image_url) {
-        avatar.innerHTML = `<img src="${data.profile_image_url}" style="width:80px;height:80px;border-radius:50%;object-fit:cover">`;
+      avatar.textContent = '';
+      if (API.isSafeImageUrl(data.profile_image_url)) {
+        const image = document.createElement('img');
+        image.src = data.profile_image_url;
+        image.style.width = '80px';
+        image.style.height = '80px';
+        image.style.borderRadius = '50%';
+        image.style.objectFit = 'cover';
+        image.alt = `${data.name} 프로필 이미지`;
+        avatar.appendChild(image);
       } else {
         avatar.textContent = data.name.charAt(0);
       }

@@ -14,7 +14,7 @@
 - **Frontend**: HTML, CSS, Vanilla JavaScript
 - **Backend**: Node.js + Express
 - **Database**: MySQL 8.0
-- **Auth**: JWT + bcrypt
+- **Auth**: HttpOnly cookie session + JWT + bcrypt
 - **Container**: Docker & Docker Compose
 - **Deploy**: Railway
 
@@ -43,6 +43,7 @@
 - 반 메세지는 같은 반에서만 보입니다.
 - 학년 메세지는 같은 학년에서만 보입니다.
 - 사용자는 본인이 작성한 과제/메세지만 삭제할 수 있습니다.
+- 다른 사용자 `userId`나 학년/반 쿼리값으로 범위를 우회 조회할 수 없도록 서버에서 로그인 사용자 기준으로 강제합니다.
 
 ## 배포 사용
 
@@ -51,6 +52,10 @@
 - 로그인 후 과제 등록, 메세지, 알림 기능을 사용할 수 있습니다.
 
 ## 로컬 개발 실행 방법
+
+1. `.env.example`을 복사해서 `.env`를 만듭니다.
+2. 비밀번호와 `JWT_SECRET`을 직접 바꿉니다.
+3. 아래 명령으로 실행합니다.
 
 ```bash
 docker-compose up -d --build
@@ -63,8 +68,9 @@ open http://localhost:3000
 - 서버 시작 시 기본 스키마를 자동 생성합니다.
 - 기존 `users.email` 컬럼이 남아 있으면 서버 시작 시 자동으로 제거됩니다.
 - 현재 인증은 이메일이 아니라 `name` 기준입니다.
+- 운영 환경에서는 `JWT_SECRET`이 반드시 필요합니다.
 
 ## 포트
 
 - Web: 3000
-- MySQL: 3307
+- MySQL: 컨테이너 내부 전용

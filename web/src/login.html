@@ -98,7 +98,6 @@
       if (!name || !password) { showError('이름과 비밀번호를 입력해주세요.'); return; }
       const res = await API.login(name, password);
       if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
-      API.setToken(res.token);
       API.setUser(res.user);
       window.location.href = 'calendar.html';
     });
@@ -114,11 +113,10 @@
         class_number: parseInt(document.getElementById('regClass').value)
       };
       if (!data.name || !data.password || !passwordConfirm) { showError('모든 필드를 입력해주세요.'); return; }
-      if (data.password.length < 4) { showError('비밀번호는 4자 이상 입력해주세요.'); return; }
+      if (data.password.length < 8) { showError('비밀번호는 8자 이상 입력해주세요.'); return; }
       if (data.password !== passwordConfirm) { showError('비밀번호 확인이 일치하지 않습니다.'); return; }
       const res = await API.register(data);
       if (!res || res.error) { showError(res?.error || '서버 연결에 실패했습니다.'); return; }
-      API.setToken(res.token);
       API.setUser(res.user);
       window.location.href = 'calendar.html';
     });
@@ -130,14 +128,12 @@
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('registerBtn').click(); });
     });
 
-    if (API.getToken()) {
-      API.me().then(data => {
-        if (data && data.user_id) {
-          API.setUser({ id: data.user_id, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled });
-          window.location.href = 'calendar.html';
-        }
-      });
-    }
+    API.me().then(data => {
+      if (data && data.user_id) {
+        API.setUser({ id: data.user_id, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled });
+        window.location.href = 'calendar.html';
+      }
+    }).catch(() => {});
   </script>
 </body>
 </html>

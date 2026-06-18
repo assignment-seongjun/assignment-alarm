@@ -18,5 +18,9 @@ npm-debug.log*
 # Log
 *.log
 
+# Local secrets
+.env
+.env.local
+
 # Uploads
 web/src/uploads/
