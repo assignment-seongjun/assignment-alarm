@@ -119,6 +119,7 @@ a { text-decoration: none; color: inherit; }
 .message-form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
 .message-form textarea { flex: 1; min-width: 200px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; resize: vertical; font-size: 0.95rem; }
 .message-form textarea:focus { outline: none; border-color: #3498db; }
+.admin-only-notice { margin-bottom: 15px; padding: 12px 14px; border-radius: 10px; background: #f4f7fb; color: #51607a; font-size: 0.9rem; }
 
 /* Settings */
 .settings-section { margin-bottom: 25px; }

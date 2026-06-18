@@ -157,7 +157,7 @@ const API = {
       ? messages.map(m => ({
           id: `message-${m.message_id}`,
           created_at: m.created_at,
-          title: m.type === 'grade' ? '학년 메세지' : '반 메세지',
+          title: m.type === 'grade' ? '학년 공지' : '반 공지',
           body: m.content,
           meta: `${m.sender_name} · ${m.type === 'grade' ? `${m.target_grade}학년` : `${m.target_grade}학년 ${m.target_class}반`}`,
           link: 'messages.html',

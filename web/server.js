@@ -568,8 +568,16 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
     if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    const target_grade = user.grade;
-    const target_class = user.class_number;
+    let target_grade = user.grade;
+    let target_class = user.class_number;
+
+    if (isAdminUser(user)) {
+      target_grade = parseInteger(req.body.target_grade);
+      target_class = parseInteger(req.body.target_class);
+      if (!target_grade || target_grade < 1 || target_grade > MAX_GRADE) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+      if (!target_class || target_class < 1 || target_class > MAX_CLASS) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
+    }
+
     const [result] = await pool.execute('INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)', [title, content || null, due_date, target_grade, target_class || null, req.user.id]);
     const assignmentId = result.insertId;
     const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND class_number = ?', [target_grade, target_class]);
@@ -729,18 +737,14 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     if (content.length > 1000) return res.status(400).json({ error: '메세지는 1000자 이하로 입력해주세요.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    let target_grade = user.grade;
-    let target_class = type === 'class' ? user.class_number : null;
+    if (!isAdminUser(user)) return res.status(403).json({ error: '학년 공지와 반 공지는 관리자만 보낼 수 있습니다.' });
 
-    if (type === 'grade') {
-      if (!isAdminUser(user)) return res.status(403).json({ error: '학년 메세지는 관리자만 보낼 수 있습니다.' });
-      target_grade = parseInteger(req.body.target_grade);
-      if (!target_grade || target_grade < 1 || target_grade > MAX_GRADE) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
-      target_class = null;
-    } else if (isAdminUser(user)) {
-      target_grade = parseInteger(req.body.target_grade);
+    let target_grade = parseInteger(req.body.target_grade);
+    let target_class = null;
+
+    if (!target_grade || target_grade < 1 || target_grade > MAX_GRADE) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+    if (type === 'class') {
       target_class = parseInteger(req.body.target_class);
-      if (!target_grade || target_grade < 1 || target_grade > MAX_GRADE) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
       if (!target_class || target_class < 1 || target_class > MAX_CLASS) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
     }
 

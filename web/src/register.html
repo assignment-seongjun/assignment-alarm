@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 과제 등록</title>
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <link rel="stylesheet" href="css/style.css?v=13">
 </head>
 <body>
   <div class="app-shell">
@@ -54,6 +54,16 @@
           <label>등록 대상</label>
           <input type="text" id="targetScope" readonly>
         </div>
+        <div class="form-row" id="adminTargetRow" style="display:none">
+          <div class="form-group">
+            <label>대상 학년</label>
+            <select id="adminTargetGrade"></select>
+          </div>
+          <div class="form-group">
+            <label>대상 반</label>
+            <select id="adminTargetClass"></select>
+          </div>
+        </div>
         <div style="display:flex;gap:10px">
           <button class="btn btn-primary" id="saveBtn">등록하기</button>
           <button class="btn btn-secondary" type="button" onclick="location.href='calendar.html'">취소</button>
@@ -86,10 +96,23 @@
       await API.loadUserInfo();
       await API.initNotifications();
       document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
-      document.getElementById('targetScope').value = user.is_admin ? '관리자는 등록 시 본인 학년/반 과제로 등록됩니다.' : `${user.grade}학년 ${user.class_number}반`;
+      document.getElementById('targetScope').value = user.is_admin ? '관리자는 원하는 학년/반을 선택해서 과제를 등록할 수 있습니다.' : `${user.grade}학년 ${user.class_number}반`;
       document.getElementById('assignmentListTitle').textContent = user.is_admin ? '전체 과제 관리' : '내가 등록한 과제';
       initAdminFilters(user);
+      initTargetSelectors(user);
       await loadMyAssignments();
+    }
+
+    function initTargetSelectors(user) {
+      if (!user || !user.is_admin) return;
+      const row = document.getElementById('adminTargetRow');
+      const gradeSelect = document.getElementById('adminTargetGrade');
+      const classSelect = document.getElementById('adminTargetClass');
+      row.style.display = 'flex';
+      gradeSelect.innerHTML = Array.from({ length: 3 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`).join('');
+      classSelect.innerHTML = Array.from({ length: 4 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`).join('');
+      gradeSelect.value = String(user.grade || 1);
+      classSelect.value = String(user.class_number || 1);
     }
 
     function initAdminFilters(user) {
@@ -153,7 +176,14 @@
 
       if (!title || !due_date) { alert('과제명과 마감일을 입력해주세요.'); return; }
 
-      const res = await API.createAssignment({ title, content: content || null, due_date });
+      const user = API.getUser();
+      const payload = { title, content: content || null, due_date };
+      if (user && user.is_admin) {
+        payload.target_grade = parseInt(document.getElementById('adminTargetGrade').value, 10);
+        payload.target_class = parseInt(document.getElementById('adminTargetClass').value, 10);
+      }
+
+      const res = await API.createAssignment(payload);
       if (res && res.success) {
         alert('과제가 등록되었습니다.');
         document.getElementById('taskTitle').value = '';
