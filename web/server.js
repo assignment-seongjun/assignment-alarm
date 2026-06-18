@@ -16,6 +16,8 @@ const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim(
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
 const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
 const ADMIN_CLASS = Number.parseInt(process.env.ADMIN_CLASS || '1', 10);
+const MAX_GRADE = 3;
+const MAX_CLASS = 4;
 const AUTH_COOKIE_NAME = 'assignment_alarm_session';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -312,8 +314,8 @@ async function seedAdminAccount(conn) {
     return;
   }
 
-  const adminGrade = Number.isInteger(ADMIN_GRADE) && ADMIN_GRADE >= 1 && ADMIN_GRADE <= 6 ? ADMIN_GRADE : 1;
-  const adminClass = Number.isInteger(ADMIN_CLASS) && ADMIN_CLASS >= 1 && ADMIN_CLASS <= 30 ? ADMIN_CLASS : 1;
+  const adminGrade = Number.isInteger(ADMIN_GRADE) && ADMIN_GRADE >= 1 && ADMIN_GRADE <= MAX_GRADE ? ADMIN_GRADE : 1;
+  const adminClass = Number.isInteger(ADMIN_CLASS) && ADMIN_CLASS >= 1 && ADMIN_CLASS <= MAX_CLASS ? ADMIN_CLASS : 1;
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
   const [rows] = await conn.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [ADMIN_NAME]);
 
@@ -348,7 +350,7 @@ app.post('/api/auth/register', authRateLimit, async (req, res) => {
     if (!password || !name || !grade || !class_number) return res.status(400).json({ error: '모든 필드를 입력해주세요.' });
     if (name.length < 2 || name.length > 30) return res.status(400).json({ error: '이름은 2자 이상 30자 이하로 입력해주세요.' });
     if (password.length < 8 || password.length > 72) return res.status(400).json({ error: '비밀번호는 8자 이상 72자 이하로 입력해주세요.' });
-    if (grade < 1 || grade > 6 || class_number < 1 || class_number > 30) return res.status(400).json({ error: '학년 또는 반 값이 올바르지 않습니다.' });
+    if (grade < 1 || grade > MAX_GRADE || class_number < 1 || class_number > MAX_CLASS) return res.status(400).json({ error: '학년 또는 반 값이 올바르지 않습니다.' });
     if (TURNSTILE_ENABLED) {
       const verification = await verifyTurnstileToken(turnstileToken, req.ip || req.socket.remoteAddress || '');
       if (!verification.success) {
@@ -450,13 +452,13 @@ app.put('/api/admin/users/:id', authMiddleware, async (req, res) => {
 
     if (req.body.grade !== undefined) {
       const grade = parseInteger(req.body.grade);
-      if (!grade || grade < 1 || grade > 6) return res.status(400).json({ error: '학년 값이 올바르지 않습니다.' });
+      if (!grade || grade < 1 || grade > MAX_GRADE) return res.status(400).json({ error: '학년 값이 올바르지 않습니다.' });
       req.body.grade = grade;
     }
 
     if (req.body.class_number !== undefined) {
       const classNumber = parseInteger(req.body.class_number);
-      if (!classNumber || classNumber < 1 || classNumber > 30) return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
+      if (!classNumber || classNumber < 1 || classNumber > MAX_CLASS) return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
       req.body.class_number = classNumber;
     }
 
@@ -733,13 +735,13 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     if (type === 'grade') {
       if (!isAdminUser(user)) return res.status(403).json({ error: '학년 메세지는 관리자만 보낼 수 있습니다.' });
       target_grade = parseInteger(req.body.target_grade);
-      if (!target_grade || target_grade < 1 || target_grade > 6) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+      if (!target_grade || target_grade < 1 || target_grade > MAX_GRADE) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
       target_class = null;
     } else if (isAdminUser(user)) {
       target_grade = parseInteger(req.body.target_grade);
       target_class = parseInteger(req.body.target_class);
-      if (!target_grade || target_grade < 1 || target_grade > 6) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
-      if (!target_class || target_class < 1 || target_class > 30) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
+      if (!target_grade || target_grade < 1 || target_grade > MAX_GRADE) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+      if (!target_class || target_class < 1 || target_class > MAX_CLASS) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
     }
 
     const [result] = await pool.execute('INSERT INTO messages (sender_id, content, type, target_grade, target_class) VALUES (?, ?, ?, ?, ?)', [req.user.id, content, type, target_grade, target_class || null]);

@@ -80,8 +80,8 @@
       const gradeSelect = document.getElementById('msgTargetGrade');
       const classSelect = document.getElementById('msgTargetClass');
 
-      gradeSelect.innerHTML = Array.from({ length: 6 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`).join('');
-      classSelect.innerHTML = Array.from({ length: 30 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`).join('');
+      gradeSelect.innerHTML = Array.from({ length: 3 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`).join('');
+      classSelect.innerHTML = Array.from({ length: 4 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`).join('');
     }
 
     function syncMessageForm() {

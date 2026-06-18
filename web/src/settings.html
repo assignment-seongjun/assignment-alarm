@@ -204,10 +204,10 @@
     }
 
     function initAdminSelectors() {
-      document.getElementById('adminSettingsAssignmentGrade').innerHTML = buildFilterOptions(6, '학년', adminSettingsState.assignmentGrade, '전체 학년');
-      document.getElementById('adminSettingsAssignmentClass').innerHTML = buildFilterOptions(30, '반', adminSettingsState.assignmentClass, '전체 반');
-      document.getElementById('adminSettingsMessageGrade').innerHTML = buildFilterOptions(6, '학년', adminSettingsState.messageGrade, '전체 학년');
-      document.getElementById('adminSettingsMessageClass').innerHTML = buildFilterOptions(30, '반', adminSettingsState.messageClass, '전체 반');
+      document.getElementById('adminSettingsAssignmentGrade').innerHTML = buildFilterOptions(3, '학년', adminSettingsState.assignmentGrade, '전체 학년');
+      document.getElementById('adminSettingsAssignmentClass').innerHTML = buildFilterOptions(4, '반', adminSettingsState.assignmentClass, '전체 반');
+      document.getElementById('adminSettingsMessageGrade').innerHTML = buildFilterOptions(3, '학년', adminSettingsState.messageGrade, '전체 학년');
+      document.getElementById('adminSettingsMessageClass').innerHTML = buildFilterOptions(4, '반', adminSettingsState.messageClass, '전체 반');
       document.getElementById('adminSettingsMessageType').value = adminSettingsState.messageType;
       syncAdminMessageSelectors();
     }
@@ -314,11 +314,11 @@
             </div>
             <div class="form-group">
               <label>학년</label>
-              <select class="admin-grade-select">${adminUserOptions(6, '학년', user.grade)}</select>
+              <select class="admin-grade-select">${adminUserOptions(3, '학년', user.grade)}</select>
             </div>
             <div class="form-group">
               <label>반</label>
-              <select class="admin-class-select">${adminUserOptions(30, '반', user.class_number)}</select>
+              <select class="admin-class-select">${adminUserOptions(4, '반', user.class_number)}</select>
             </div>
           </div>
           <div class="admin-user-meta">생성일 ${new Date(user.created_at).toLocaleString('ko-KR')}</div>

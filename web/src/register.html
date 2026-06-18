@@ -101,10 +101,10 @@
 
       wrap.classList.add('show');
       gradeSelect.innerHTML = ['<option value="all">전체 학년</option>']
-        .concat(Array.from({ length: 6 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`))
+        .concat(Array.from({ length: 3 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`))
         .join('');
       classSelect.innerHTML = ['<option value="all">전체 반</option>']
-        .concat(Array.from({ length: 30 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`))
+        .concat(Array.from({ length: 4 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`))
         .join('');
       gradeSelect.value = adminGradeFilter;
       classSelect.value = adminClassFilter;
