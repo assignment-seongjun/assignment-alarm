@@ -55,7 +55,11 @@ const API = {
       credentials: 'same-origin',
       body: body ? JSON.stringify(body) : undefined
     });
+    const isAuthRequest = url === '/api/auth/login' || url === '/api/auth/register';
     if (res.status === 401) {
+      if (isAuthRequest) {
+        return res.json();
+      }
       this.clearToken();
       this.clearUser();
       if (!this.isLoginPage()) {
