@@ -141,6 +141,7 @@
       const firstDay = new Date(year, month, 1).getDay();
       const lastDate = new Date(year, month + 1, 0).getDate();
       const today = new Date();
+      const urgentThreshold = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
 
       let html = '';
       for (let i = 0; i < firstDay; i++) html += '<div class="day empty"></div>';
@@ -152,7 +153,11 @@
 
         let tags = '';
         dayTasks.sort((a, b) => a.is_completed === b.is_completed ? 0 : a.is_completed ? 1 : -1).forEach(a => {
-          const cls = user && user.is_admin ? 'urgent' : a.is_completed ? 'done' : 'normal';
+          const cls = a.is_completed
+            ? 'done'
+            : a.due_date <= urgentThreshold
+              ? 'urgent'
+              : 'normal';
           const label = user && user.is_admin
             ? `${a.target_grade}학년 ${a.target_class}반 · ${a.title}`
             : a.title;
@@ -170,20 +175,6 @@
     function updateStats(visibleAssignments) {
       const today = new Date();
       const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
-      const user = API.getUser();
-
-      if (user && user.is_admin) {
-        const urgent = visibleAssignments.filter(a => a.due_date <= twoDaysLater);
-        const normal = visibleAssignments.filter(a => a.due_date > twoDaysLater);
-        document.getElementById('urgentLabel').textContent = '임박';
-        document.getElementById('normalLabel').textContent = '이후';
-        document.getElementById('doneLabel').textContent = '전체';
-        document.getElementById('urgentCount').textContent = urgent.length;
-        document.getElementById('normalCount').textContent = normal.length;
-        document.getElementById('doneCount').textContent = visibleAssignments.length;
-        return;
-      }
-
       const urgent = visibleAssignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
       const normal = visibleAssignments.filter(a => !a.is_completed && a.due_date > twoDaysLater);
       const done = visibleAssignments.filter(a => a.is_completed);
