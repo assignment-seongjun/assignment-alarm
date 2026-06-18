@@ -15,6 +15,9 @@ const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
 const GOOGLE_ALLOWED_DOMAIN = 'bssm.hs.kr';
+const ADMIN_GOOGLE_EMAIL = process.env.ADMIN_GOOGLE_EMAIL
+  ? String(process.env.ADMIN_GOOGLE_EMAIL).trim().toLowerCase()
+  : (process.env.ADMIN_EMAIL ? String(process.env.ADMIN_EMAIL).trim().toLowerCase() : null);
 const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim() : null;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
 const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
@@ -188,6 +191,10 @@ function parseInteger(value) {
 
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' ? 1 : 0;
+}
+
+function isAdminEmail(email) {
+  return Boolean(ADMIN_GOOGLE_EMAIL && String(email || '').trim().toLowerCase() === ADMIN_GOOGLE_EMAIL);
 }
 
 function isAdminUser(user) {
@@ -402,6 +409,14 @@ async function migrateSchema(conn) {
 }
 
 async function seedAdminAccount(conn) {
+  if (ADMIN_GOOGLE_EMAIL) {
+    const [googleRows] = await conn.execute('SELECT user_id FROM users WHERE google_email = ? LIMIT 1', [ADMIN_GOOGLE_EMAIL]);
+    if (googleRows.length > 0) {
+      await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [googleRows[0].user_id]);
+      console.log(`Admin account synced by email: ${ADMIN_GOOGLE_EMAIL}`);
+    }
+  }
+
   if (!ADMIN_NAME || !ADMIN_PASSWORD) return;
   if (ADMIN_PASSWORD.length < 8) {
     console.warn('Skipping admin bootstrap: ADMIN_PASSWORD must be at least 8 characters.');
@@ -455,6 +470,11 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
     const existingUser = await findUserByGoogleSub(profile.google_sub);
 
     if (existingUser) {
+      const shouldGrantAdmin = isAdminEmail(profile.google_email);
+      if (shouldGrantAdmin && !isAdminUser(existingUser)) {
+        await pool.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [existingUser.user_id]);
+      }
+
       await pool.execute(
         'UPDATE users SET google_email = ?, profile_image_url = COALESCE(?, profile_image_url) WHERE user_id = ?',
         [profile.google_email, profile.profile_image_url, existingUser.user_id]
@@ -465,7 +485,7 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
         name: existingUser.name,
         grade: existingUser.grade,
         class_number: existingUser.class_number,
-        is_admin: existingUser.is_admin
+        is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
       };
       setAuthCookie(res, createToken(user));
       clearAuthRateLimit(req);
@@ -477,7 +497,7 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
           class_number: existingUser.class_number,
           profile_image_url: profile.profile_image_url || existingUser.profile_image_url,
           is_alarm_enabled: existingUser.is_alarm_enabled,
-          is_admin: existingUser.is_admin
+          is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
         }
       });
     }
@@ -527,12 +547,16 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
 
     const existingUser = await findUserByGoogleSub(decoded.profile.google_sub);
     if (existingUser) {
+      const shouldGrantAdmin = isAdminEmail(decoded.profile.google_email);
+      if (shouldGrantAdmin && !isAdminUser(existingUser)) {
+        await pool.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [existingUser.user_id]);
+      }
       const user = {
         id: existingUser.user_id,
         name: existingUser.name,
         grade: existingUser.grade,
         class_number: existingUser.class_number,
-        is_admin: existingUser.is_admin
+        is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
       };
       setAuthCookie(res, createToken(user));
       clearAuthRateLimit(req);
@@ -544,15 +568,16 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
           class_number: existingUser.class_number,
           profile_image_url: existingUser.profile_image_url,
           is_alarm_enabled: existingUser.is_alarm_enabled,
-          is_admin: existingUser.is_admin
+          is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
         }
       });
     }
 
     const uniqueName = normalizeGoogleName(decoded.profile.name);
+    const isAdmin = isAdminEmail(decoded.profile.google_email) ? 1 : 0;
     const passwordHash = await bcrypt.hash(`google:${decoded.profile.google_sub}:${crypto.randomBytes(8).toString('hex')}`, 10);
     const [result] = await pool.execute(
-      'INSERT INTO users (password, name, google_sub, google_email, grade, class_number, profile_image_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO users (password, name, google_sub, google_email, grade, class_number, profile_image_url, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         passwordHash,
         uniqueName,
@@ -560,11 +585,12 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
         decoded.profile.google_email,
         grade,
         class_number,
-        decoded.profile.profile_image_url
+        decoded.profile.profile_image_url,
+        isAdmin
       ]
     );
 
-    const user = { id: result.insertId, name: uniqueName, grade, class_number, is_admin: 0 };
+    const user = { id: result.insertId, name: uniqueName, grade, class_number, is_admin: isAdmin };
     setAuthCookie(res, createToken(user));
     clearAuthRateLimit(req);
     return res.json({
@@ -575,7 +601,7 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
         class_number,
         profile_image_url: decoded.profile.profile_image_url,
         is_alarm_enabled: 1,
-        is_admin: 0
+        is_admin: isAdmin
       }
     });
   } catch (e) {
