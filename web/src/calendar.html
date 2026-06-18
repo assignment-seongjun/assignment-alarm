@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=9">
+  <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
   <div class="app-shell">
@@ -35,6 +35,12 @@
   </header>
 
   <div class="container">
+    <div class="admin-filter-bar" id="adminCalendarFilter">
+      <strong>조회 범위</strong>
+      <select id="adminGradeFilter"></select>
+      <select id="adminClassFilter"></select>
+    </div>
+
     <div class="stats">
       <div class="stat-card urgent"><div class="num" id="urgentCount">0</div><div class="label" id="urgentLabel">긴급</div></div>
       <div class="stat-card normal"><div class="num" id="normalCount">0</div><div class="label" id="normalLabel">진행중</div></div>
@@ -71,6 +77,8 @@
   <script>
     let currentDate = new Date();
     let assignments = [];
+    let adminGradeFilter = 'all';
+    let adminClassFilter = 'all';
 
     API.requireAuth();
 
@@ -83,17 +91,49 @@
         ? await API.getAssignments()
         : await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
       if (data) assignments = data;
+      initAdminFilters(user);
       renderCalendar();
+    }
+
+    function initAdminFilters(user) {
+      if (!user || !user.is_admin) return;
+
+      const wrap = document.getElementById('adminCalendarFilter');
+      const gradeSelect = document.getElementById('adminGradeFilter');
+      const classSelect = document.getElementById('adminClassFilter');
+
+      wrap.classList.add('show');
+      gradeSelect.innerHTML = ['<option value="all">전체 학년</option>']
+        .concat(Array.from({ length: 6 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`))
+        .join('');
+      classSelect.innerHTML = ['<option value="all">전체 반</option>']
+        .concat(Array.from({ length: 30 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`))
+        .join('');
+
+      gradeSelect.value = adminGradeFilter;
+      classSelect.value = adminClassFilter;
+    }
+
+    function getVisibleAssignments() {
+      const user = API.getUser();
+      if (!user || !user.is_admin) return assignments;
+
+      return assignments.filter(a => {
+        const gradeMatch = adminGradeFilter === 'all' || String(a.target_grade) === adminGradeFilter;
+        const classMatch = adminClassFilter === 'all' || String(a.target_class) === adminClassFilter;
+        return gradeMatch && classMatch;
+      });
     }
 
     function renderCalendar() {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
       const user = API.getUser();
+      const visibleAssignments = getVisibleAssignments();
 
       document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월`;
       document.getElementById('classScope').textContent = user && user.is_admin
-        ? '전체 학년/반 과제'
+        ? `${adminGradeFilter === 'all' ? '전체 학년' : adminGradeFilter + '학년'} / ${adminClassFilter === 'all' ? '전체 반' : adminClassFilter + '반'}`
         : user && user.grade && user.class_number
           ? `${user.grade}학년 ${user.class_number}반 과제`
           : '';
@@ -108,7 +148,7 @@
       for (let d = 1; d <= lastDate; d++) {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
-        const dayTasks = assignments.filter(a => a.due_date === dateStr);
+        const dayTasks = visibleAssignments.filter(a => a.due_date === dateStr);
 
         let tags = '';
         dayTasks.sort((a, b) => a.is_completed === b.is_completed ? 0 : a.is_completed ? 1 : -1).forEach(a => {
@@ -124,29 +164,29 @@
       }
 
       document.getElementById('calendarBody').innerHTML = html;
-      updateStats();
+      updateStats(visibleAssignments);
     }
 
-    function updateStats() {
+    function updateStats(visibleAssignments) {
       const today = new Date();
       const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
       const user = API.getUser();
 
       if (user && user.is_admin) {
-        const urgent = assignments.filter(a => a.due_date <= twoDaysLater);
-        const normal = assignments.filter(a => a.due_date > twoDaysLater);
+        const urgent = visibleAssignments.filter(a => a.due_date <= twoDaysLater);
+        const normal = visibleAssignments.filter(a => a.due_date > twoDaysLater);
         document.getElementById('urgentLabel').textContent = '임박';
         document.getElementById('normalLabel').textContent = '이후';
         document.getElementById('doneLabel').textContent = '전체';
         document.getElementById('urgentCount').textContent = urgent.length;
         document.getElementById('normalCount').textContent = normal.length;
-        document.getElementById('doneCount').textContent = assignments.length;
+        document.getElementById('doneCount').textContent = visibleAssignments.length;
         return;
       }
 
-      const urgent = assignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
-      const normal = assignments.filter(a => !a.is_completed && a.due_date > twoDaysLater);
-      const done = assignments.filter(a => a.is_completed);
+      const urgent = visibleAssignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
+      const normal = visibleAssignments.filter(a => !a.is_completed && a.due_date > twoDaysLater);
+      const done = visibleAssignments.filter(a => a.is_completed);
       document.getElementById('urgentLabel').textContent = '긴급';
       document.getElementById('normalLabel').textContent = '진행중';
       document.getElementById('doneLabel').textContent = '완료';
@@ -173,7 +213,7 @@
       const day = e.target.closest('.day');
       if (day && !day.classList.contains('empty')) {
         const date = day.dataset.date;
-        const dayTasks = assignments.filter(a => a.due_date === date);
+        const dayTasks = getVisibleAssignments().filter(a => a.due_date === date);
         if (dayTasks.length === 0) return;
 
         document.getElementById('modalTitle').textContent = `${date} 과제`;
@@ -218,6 +258,18 @@
 
     document.getElementById('prevMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
     document.getElementById('nextMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
+    document.getElementById('adminGradeFilter').addEventListener('change', (e) => {
+      adminGradeFilter = e.target.value;
+      if (adminGradeFilter === 'all') {
+        adminClassFilter = 'all';
+        document.getElementById('adminClassFilter').value = 'all';
+      }
+      renderCalendar();
+    });
+    document.getElementById('adminClassFilter').addEventListener('change', (e) => {
+      adminClassFilter = e.target.value;
+      renderCalendar();
+    });
     document.getElementById('closeModal').addEventListener('click', () => document.getElementById('modal').classList.remove('show'));
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') document.getElementById('modal').classList.remove('show'); });
 

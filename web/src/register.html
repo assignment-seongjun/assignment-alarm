@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 과제 등록</title>
-  <link rel="stylesheet" href="css/style.css?v=10">
+  <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
   <div class="app-shell">
@@ -61,6 +61,12 @@
       </form>
     </div>
 
+    <div class="admin-filter-bar" id="adminAssignmentFilter">
+      <strong>조회 범위</strong>
+      <select id="adminAssignmentGradeFilter"></select>
+      <select id="adminAssignmentClassFilter"></select>
+    </div>
+
     <div class="card">
       <h3 id="assignmentListTitle">내가 등록한 과제</h3>
       <div id="myAssignments"><div class="empty-state">등록한 과제가 없습니다.</div></div>
@@ -71,6 +77,8 @@
   <script src="js/api.js?v=8"></script>
   <script>
     API.requireAuth();
+    let adminGradeFilter = 'all';
+    let adminClassFilter = 'all';
 
     async function init() {
       const user = await API.ensureUser();
@@ -80,14 +88,45 @@
       document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
       document.getElementById('targetScope').value = user.is_admin ? '관리자는 등록 시 본인 학년/반 과제로 등록됩니다.' : `${user.grade}학년 ${user.class_number}반`;
       document.getElementById('assignmentListTitle').textContent = user.is_admin ? '전체 과제 관리' : '내가 등록한 과제';
+      initAdminFilters(user);
       await loadMyAssignments();
+    }
+
+    function initAdminFilters(user) {
+      if (!user || !user.is_admin) return;
+
+      const wrap = document.getElementById('adminAssignmentFilter');
+      const gradeSelect = document.getElementById('adminAssignmentGradeFilter');
+      const classSelect = document.getElementById('adminAssignmentClassFilter');
+
+      wrap.classList.add('show');
+      gradeSelect.innerHTML = ['<option value="all">전체 학년</option>']
+        .concat(Array.from({ length: 6 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`))
+        .join('');
+      classSelect.innerHTML = ['<option value="all">전체 반</option>']
+        .concat(Array.from({ length: 30 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`))
+        .join('');
+      gradeSelect.value = adminGradeFilter;
+      classSelect.value = adminClassFilter;
+    }
+
+    function getVisibleAssignments(user, data) {
+      if (!user.is_admin) {
+        return data ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
+      }
+
+      return (data || []).filter(a => {
+        const gradeMatch = adminGradeFilter === 'all' || String(a.target_grade) === adminGradeFilter;
+        const classMatch = adminClassFilter === 'all' || String(a.target_class) === adminClassFilter;
+        return gradeMatch && classMatch;
+      });
     }
 
     async function loadMyAssignments() {
       const user = await API.ensureUser();
       if (!user) return;
       const data = await API.getAssignments(user.grade, user.class_number);
-      const visibleAssignments = user.is_admin ? (data || []) : data ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
+      const visibleAssignments = getVisibleAssignments(user, data);
       const container = document.getElementById('myAssignments');
       if (visibleAssignments.length === 0) {
         container.innerHTML = `<div class="empty-state">${user.is_admin ? '등록된 과제가 없습니다.' : '등록한 과제가 없습니다.'}</div>`;
@@ -134,6 +173,20 @@
         await loadMyAssignments();
         await API.refreshNotifications();
       }
+    });
+
+    document.getElementById('adminAssignmentGradeFilter').addEventListener('change', async (e) => {
+      adminGradeFilter = e.target.value;
+      if (adminGradeFilter === 'all') {
+        adminClassFilter = 'all';
+        document.getElementById('adminAssignmentClassFilter').value = 'all';
+      }
+      await loadMyAssignments();
+    });
+
+    document.getElementById('adminAssignmentClassFilter').addEventListener('change', async (e) => {
+      adminClassFilter = e.target.value;
+      await loadMyAssignments();
     });
 
     init();
