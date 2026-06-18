@@ -30,6 +30,7 @@
         <div class="auth-divider" id="googleDivider" style="display:none"><span>또는</span></div>
         <div id="googleLoginBox" style="display:none">
           <div id="googleLoginButton" class="google-login-button"></div>
+          <div class="auth-link" id="googleDomainHint" style="display:none; margin-top:10px;">@bssm.hs.kr 학교 계정만 사용할 수 있습니다.</div>
         </div>
         <div class="auth-link">계정이 없으신가요? <a id="goToRegister">회원가입</a></div>
       </div>
@@ -181,6 +182,7 @@
 
       document.getElementById('googleDivider').style.display = 'block';
       document.getElementById('googleLoginBox').style.display = 'block';
+      document.getElementById('googleDomainHint').style.display = 'block';
       api.initialize({
         client_id: googleClientId,
         callback: async (response) => {

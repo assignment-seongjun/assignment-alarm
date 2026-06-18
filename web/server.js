@@ -14,6 +14,7 @@ const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
+const GOOGLE_ALLOWED_DOMAIN = 'bssm.hs.kr';
 const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim() : null;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
 const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
@@ -210,10 +211,14 @@ async function verifyGoogleCredential(credential) {
   if (!payload?.sub) {
     throw new Error('google-invalid-token');
   }
+  const email = String(payload.email || '').trim().toLowerCase();
+  if (!payload.email_verified || !email.endsWith(`@${GOOGLE_ALLOWED_DOMAIN}`)) {
+    throw new Error('google-domain-not-allowed');
+  }
 
   return {
     google_sub: payload.sub,
-    google_email: payload.email || null,
+    google_email: email,
     name: normalizeGoogleName(payload.name || payload.email || 'Google 사용자'),
     profile_image_url: payload.picture || null
   };
@@ -549,6 +554,8 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
   } catch (error) {
     const message = error?.message === 'google-not-configured'
       ? '구글 로그인이 아직 설정되지 않았습니다.'
+      : error?.message === 'google-domain-not-allowed'
+        ? 'bssm.hs.kr 학교 계정으로만 로그인할 수 있습니다.'
       : '구글 로그인 확인에 실패했습니다.';
     return res.status(401).json({ error: message });
   }
