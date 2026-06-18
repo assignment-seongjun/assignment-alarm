@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 로그인</title>
-  <link rel="stylesheet" href="css/style.css?v=14">
+  <link rel="stylesheet" href="css/style.css?v=15">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
 <body class="login-page">
@@ -26,6 +27,10 @@
           <input type="password" id="loginPassword" placeholder="비밀번호">
         </div>
         <button class="btn btn-primary" style="width:100%" id="loginBtn">로그인</button>
+        <div class="auth-divider" id="googleDivider" style="display:none"><span>또는</span></div>
+        <div id="googleLoginBox" style="display:none">
+          <div id="googleLoginButton" class="google-login-button"></div>
+        </div>
         <div class="auth-link">계정이 없으신가요? <a id="goToRegister">회원가입</a></div>
       </div>
 
@@ -67,6 +72,38 @@
         <button class="btn btn-primary" style="width:100%" id="registerBtn">회원가입</button>
         <div class="auth-link">이미 계정이 있으신가요? <a id="goToLogin">로그인</a></div>
       </div>
+
+      <div id="googleProfileForm" style="display:none">
+        <div class="form-group">
+          <label>이름</label>
+          <input type="text" id="googleProfileName" readonly>
+        </div>
+        <div class="form-group">
+          <label>이메일</label>
+          <input type="text" id="googleProfileEmail" readonly>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>학년</label>
+            <select id="googleGrade">
+              <option value="1">1학년</option>
+              <option value="2">2학년</option>
+              <option value="3">3학년</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>반</label>
+            <select id="googleClass">
+              <option value="1">1반</option>
+              <option value="2">2반</option>
+              <option value="3">3반</option>
+              <option value="4">4반</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="googleProfileBtn">시작하기</button>
+        <div class="auth-link"><a id="cancelGoogleSetup">다시 로그인 선택으로 돌아가기</a></div>
+      </div>
     </div>
   </div>
   </div>
@@ -75,6 +112,9 @@
   <script>
     let turnstileSiteKey = null;
     let turnstileWidgetId = null;
+    let googleClientId = null;
+    let googleSetupToken = null;
+    let googleButtonRendered = false;
 
     function showError(msg) {
       const el = document.getElementById('authError');
@@ -89,6 +129,7 @@
     function showRegisterForm() {
       hideError();
       document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('googleProfileForm').style.display = 'none';
       document.getElementById('registerForm').style.display = 'block';
       renderTurnstileIfNeeded();
     }
@@ -96,7 +137,72 @@
     function showLoginForm() {
       hideError();
       document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('googleProfileForm').style.display = 'none';
       document.getElementById('loginForm').style.display = 'block';
+    }
+
+    function showGoogleProfileForm(profile, setupToken) {
+      hideError();
+      googleSetupToken = setupToken;
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('googleProfileForm').style.display = 'block';
+      document.getElementById('googleProfileName').value = profile?.name || '';
+      document.getElementById('googleProfileEmail').value = profile?.email || '';
+    }
+
+    function getGoogleApi() {
+      return window.google?.accounts?.id || null;
+    }
+
+    async function handleGoogleCredential(credential) {
+      hideError();
+      const res = await API.googleAuth(credential);
+      if (!res || res.error) {
+        showError(res?.error || '구글 로그인에 실패했습니다.');
+        return;
+      }
+      if (res.requiresProfile) {
+        showGoogleProfileForm(res.profile, res.setupToken);
+        return;
+      }
+      API.setUser(res.user);
+      window.location.href = 'calendar.html';
+    }
+
+    function renderGoogleLoginIfNeeded() {
+      if (!googleClientId || googleButtonRendered) return;
+
+      const api = getGoogleApi();
+      if (!api) {
+        window.setTimeout(renderGoogleLoginIfNeeded, 200);
+        return;
+      }
+
+      document.getElementById('googleDivider').style.display = 'block';
+      document.getElementById('googleLoginBox').style.display = 'block';
+      api.initialize({
+        client_id: googleClientId,
+        callback: async (response) => {
+          if (!response?.credential) {
+            showError('구글 인증 결과를 가져오지 못했습니다.');
+            return;
+          }
+          await handleGoogleCredential(response.credential);
+        },
+        use_fedcm_for_prompt: true
+      });
+      api.renderButton(
+        document.getElementById('googleLoginButton'),
+        {
+          theme: 'outline',
+          size: 'large',
+          width: 340,
+          text: 'signin_with',
+          shape: 'rectangular'
+        }
+      );
+      googleButtonRendered = true;
     }
 
     function getTurnstileApi() {
@@ -136,6 +242,10 @@
           renderTurnstileIfNeeded();
         }
       }
+      if (config && config.googleClientId) {
+        googleClientId = config.googleClientId;
+        renderGoogleLoginIfNeeded();
+      }
     }
 
     document.getElementById('goToRegister').addEventListener('click', () => {
@@ -143,6 +253,11 @@
     });
 
     document.getElementById('goToLogin').addEventListener('click', () => {
+      showLoginForm();
+    });
+
+    document.getElementById('cancelGoogleSetup').addEventListener('click', () => {
+      googleSetupToken = null;
       showLoginForm();
     });
 
@@ -180,6 +295,28 @@
       if (!res || res.error) {
         resetTurnstile();
         showError(res?.error || '서버 연결에 실패했습니다.');
+        return;
+      }
+      API.setUser(res.user);
+      window.location.href = 'calendar.html';
+    });
+
+    document.getElementById('googleProfileBtn').addEventListener('click', async () => {
+      hideError();
+      if (!googleSetupToken) {
+        showError('구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.');
+        showLoginForm();
+        return;
+      }
+
+      const payload = {
+        setupToken: googleSetupToken,
+        grade: parseInt(document.getElementById('googleGrade').value, 10),
+        class_number: parseInt(document.getElementById('googleClass').value, 10)
+      };
+      const res = await API.googleRegister(payload);
+      if (!res || res.error) {
+        showError(res?.error || '구글 가입을 완료하지 못했습니다.');
         return;
       }
       API.setUser(res.user);

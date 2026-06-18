@@ -2,6 +2,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -12,6 +13,7 @@ const JWT_SECRET = process.env.JWT_SECRET || (!IS_PRODUCTION ? crypto.randomByte
 const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
 const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim() : null;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
 const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
@@ -23,6 +25,7 @@ const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
 const authAttempts = new Map();
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 const dbConfig = {
   host: process.env.MYSQLHOST || process.env.DB_HOST || 'mysql',
@@ -51,6 +54,8 @@ const bootstrapSchema = [
     user_id INT AUTO_INCREMENT PRIMARY KEY,
     password VARCHAR(255) NOT NULL,
     name VARCHAR(100) NOT NULL UNIQUE,
+    google_sub VARCHAR(255) DEFAULT NULL,
+    google_email VARCHAR(255) DEFAULT NULL,
     grade INT NOT NULL,
     class_number INT NOT NULL,
     profile_image_url VARCHAR(500) DEFAULT NULL,
@@ -155,8 +160,24 @@ function setAuthCookie(res, token) {
   res.setHeader('Set-Cookie', buildAuthCookie(token));
 }
 
+function createGoogleSetupToken(profile) {
+  return jwt.sign(
+    { type: 'google-setup', profile },
+    JWT_SECRET,
+    { expiresIn: '10m' }
+  );
+}
+
 function normalizeName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeGoogleName(value) {
+  let name = normalizeName(value);
+  if (!name) name = 'Google 사용자';
+  if (name.length > 30) name = name.slice(0, 30).trim();
+  if (name.length < 2) name = 'Google 사용자';
+  return name;
 }
 
 function parseInteger(value) {
@@ -174,6 +195,56 @@ function isAdminUser(user) {
 
 function isValidDateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+async function verifyGoogleCredential(credential) {
+  if (!googleClient || !GOOGLE_CLIENT_ID) {
+    throw new Error('google-not-configured');
+  }
+
+  const ticket = await googleClient.verifyIdToken({
+    idToken: credential,
+    audience: GOOGLE_CLIENT_ID
+  });
+  const payload = ticket.getPayload();
+  if (!payload?.sub) {
+    throw new Error('google-invalid-token');
+  }
+
+  return {
+    google_sub: payload.sub,
+    google_email: payload.email || null,
+    name: normalizeGoogleName(payload.name || payload.email || 'Google 사용자'),
+    profile_image_url: payload.picture || null
+  };
+}
+
+async function findUserByGoogleSub(googleSub) {
+  const [rows] = await pool.execute(
+    'SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin, google_sub, google_email FROM users WHERE google_sub = ? LIMIT 1',
+    [googleSub]
+  );
+  return rows[0] || null;
+}
+
+async function buildUniqueName(baseName, excludeUserId = null) {
+  const base = normalizeGoogleName(baseName);
+  let candidate = base;
+  let suffix = 2;
+
+  while (true) {
+    const params = excludeUserId ? [candidate, excludeUserId] : [candidate];
+    const sql = excludeUserId
+      ? 'SELECT user_id FROM users WHERE name = ? AND user_id <> ? LIMIT 1'
+      : 'SELECT user_id FROM users WHERE name = ? LIMIT 1';
+    const [rows] = await pool.execute(sql, params);
+    if (rows.length === 0) return candidate;
+
+    const suffixText = ` ${suffix}`;
+    const trimmedBase = base.slice(0, Math.max(2, 30 - suffixText.length)).trim();
+    candidate = `${trimmedBase}${suffixText}`;
+    suffix += 1;
+  }
 }
 
 function authRateLimit(req, res, next) {
@@ -255,7 +326,7 @@ async function verifyTurnstileToken(token, remoteIp) {
 }
 
 async function migrateSchema(conn) {
-  const [emailColumns] = await conn.execute(
+  const [legacyEmailColumns] = await conn.execute(
     `SELECT COLUMN_NAME
      FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE()
@@ -263,7 +334,7 @@ async function migrateSchema(conn) {
        AND COLUMN_NAME = 'email'`
   );
 
-  if (emailColumns.length > 0) {
+  if (legacyEmailColumns.length > 0) {
     const [emailIndexes] = await conn.execute(
       `SELECT INDEX_NAME
        FROM INFORMATION_SCHEMA.STATISTICS
@@ -280,6 +351,30 @@ async function migrateSchema(conn) {
     await conn.execute('ALTER TABLE users DROP COLUMN email');
   }
 
+  const [googleSubColumns] = await conn.execute(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'google_sub'`
+  );
+
+  if (googleSubColumns.length === 0) {
+    await conn.execute('ALTER TABLE users ADD COLUMN google_sub VARCHAR(255) DEFAULT NULL AFTER name');
+  }
+
+  const [googleEmailColumns] = await conn.execute(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'google_email'`
+  );
+
+  if (googleEmailColumns.length === 0) {
+    await conn.execute('ALTER TABLE users ADD COLUMN google_email VARCHAR(255) DEFAULT NULL AFTER google_sub');
+  }
+
   const [nameUniqueIndexes] = await conn.execute(
     `SELECT INDEX_NAME
      FROM INFORMATION_SCHEMA.STATISTICS
@@ -292,6 +387,20 @@ async function migrateSchema(conn) {
 
   if (nameUniqueIndexes.length === 0) {
     await conn.execute('ALTER TABLE users ADD UNIQUE INDEX users_name_unique (name)');
+  }
+
+  const [googleSubUniqueIndexes] = await conn.execute(
+    `SELECT INDEX_NAME
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'google_sub'
+       AND NON_UNIQUE = 0
+       AND INDEX_NAME <> 'PRIMARY'`
+  );
+
+  if (googleSubUniqueIndexes.length === 0) {
+    await conn.execute('ALTER TABLE users ADD UNIQUE INDEX users_google_sub_unique (google_sub)');
   }
 
   const [adminColumns] = await conn.execute(
@@ -337,7 +446,10 @@ async function seedAdminAccount(conn) {
 
 // Auth
 app.get('/api/public-config', (_req, res) => {
-  res.json({ turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : null });
+  res.json({
+    turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : null,
+    googleClientId: GOOGLE_CLIENT_ID || null
+  });
 });
 
 app.post('/api/auth/register', authRateLimit, async (req, res) => {
@@ -385,6 +497,145 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
     res.json({ user: { id: user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled, is_admin: user.is_admin } });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.post('/api/auth/google', authRateLimit, async (req, res) => {
+  try {
+    const credential = String(req.body.credential || '').trim();
+    if (!credential) return res.status(400).json({ error: '구글 인증 정보가 없습니다.' });
+    if (!GOOGLE_CLIENT_ID) return res.status(503).json({ error: '구글 로그인이 아직 설정되지 않았습니다.' });
+
+    const profile = await verifyGoogleCredential(credential);
+    const existingUser = await findUserByGoogleSub(profile.google_sub);
+
+    if (existingUser) {
+      await pool.execute(
+        'UPDATE users SET google_email = ?, profile_image_url = COALESCE(?, profile_image_url) WHERE user_id = ?',
+        [profile.google_email, profile.profile_image_url, existingUser.user_id]
+      );
+
+      const user = {
+        id: existingUser.user_id,
+        name: existingUser.name,
+        grade: existingUser.grade,
+        class_number: existingUser.class_number,
+        is_admin: existingUser.is_admin
+      };
+      setAuthCookie(res, createToken(user));
+      clearAuthRateLimit(req);
+      return res.json({
+        user: {
+          id: existingUser.user_id,
+          name: existingUser.name,
+          grade: existingUser.grade,
+          class_number: existingUser.class_number,
+          profile_image_url: profile.profile_image_url || existingUser.profile_image_url,
+          is_alarm_enabled: existingUser.is_alarm_enabled,
+          is_admin: existingUser.is_admin
+        }
+      });
+    }
+
+    return res.json({
+      requiresProfile: true,
+      setupToken: createGoogleSetupToken(profile),
+      profile: {
+        name: profile.name,
+        email: profile.google_email,
+        profile_image_url: profile.profile_image_url
+      }
+    });
+  } catch (error) {
+    const message = error?.message === 'google-not-configured'
+      ? '구글 로그인이 아직 설정되지 않았습니다.'
+      : '구글 로그인 확인에 실패했습니다.';
+    return res.status(401).json({ error: message });
+  }
+});
+
+app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
+  try {
+    const setupToken = String(req.body.setupToken || '').trim();
+    const grade = parseInteger(req.body.grade);
+    const class_number = parseInteger(req.body.class_number);
+
+    if (!setupToken || !grade || !class_number) {
+      return res.status(400).json({ error: '학년과 반을 입력해주세요.' });
+    }
+    if (grade < 1 || grade > MAX_GRADE || class_number < 1 || class_number > MAX_CLASS) {
+      return res.status(400).json({ error: '학년 또는 반 값이 올바르지 않습니다.' });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(setupToken, JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: '구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.' });
+    }
+
+    if (decoded?.type !== 'google-setup' || !decoded?.profile?.google_sub) {
+      return res.status(401).json({ error: '구글 가입 정보가 올바르지 않습니다.' });
+    }
+
+    const existingUser = await findUserByGoogleSub(decoded.profile.google_sub);
+    if (existingUser) {
+      const user = {
+        id: existingUser.user_id,
+        name: existingUser.name,
+        grade: existingUser.grade,
+        class_number: existingUser.class_number,
+        is_admin: existingUser.is_admin
+      };
+      setAuthCookie(res, createToken(user));
+      clearAuthRateLimit(req);
+      return res.json({
+        user: {
+          id: existingUser.user_id,
+          name: existingUser.name,
+          grade: existingUser.grade,
+          class_number: existingUser.class_number,
+          profile_image_url: existingUser.profile_image_url,
+          is_alarm_enabled: existingUser.is_alarm_enabled,
+          is_admin: existingUser.is_admin
+        }
+      });
+    }
+
+    const uniqueName = await buildUniqueName(decoded.profile.name);
+    const passwordHash = await bcrypt.hash(`google:${decoded.profile.google_sub}:${crypto.randomBytes(8).toString('hex')}`, 10);
+    const [result] = await pool.execute(
+      'INSERT INTO users (password, name, google_sub, google_email, grade, class_number, profile_image_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [
+        passwordHash,
+        uniqueName,
+        decoded.profile.google_sub,
+        decoded.profile.google_email,
+        grade,
+        class_number,
+        decoded.profile.profile_image_url
+      ]
+    );
+
+    const user = { id: result.insertId, name: uniqueName, grade, class_number, is_admin: 0 };
+    setAuthCookie(res, createToken(user));
+    clearAuthRateLimit(req);
+    return res.json({
+      user: {
+        id: result.insertId,
+        name: uniqueName,
+        grade,
+        class_number,
+        profile_image_url: decoded.profile.profile_image_url,
+        is_alarm_enabled: 1,
+        is_admin: 0
+      }
+    });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: '이미 연결된 구글 계정입니다.' });
+    }
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 

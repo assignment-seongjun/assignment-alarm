@@ -55,7 +55,7 @@ const API = {
       credentials: 'same-origin',
       body: body ? JSON.stringify(body) : undefined
     });
-    const isAuthRequest = url === '/api/auth/login' || url === '/api/auth/register';
+    const isAuthRequest = url === '/api/auth/login' || url === '/api/auth/register' || url === '/api/auth/google' || url === '/api/auth/google/register';
     if (res.status === 401) {
       if (isAuthRequest) {
         return res.json();
@@ -77,6 +77,8 @@ const API = {
 
   login(name, password) { return this.post('/api/auth/login', { name, password }); },
   register(data) { return this.post('/api/auth/register', data); },
+  googleAuth(credential) { return this.post('/api/auth/google', { credential }); },
+  googleRegister(data) { return this.post('/api/auth/google/register', data); },
   me() { return this.get('/api/auth/me'); },
   logoutRequest() { return this.post('/api/auth/logout'); },
   publicConfig() { return this.get('/api/public-config'); },
