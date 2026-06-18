@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
   <div class="app-shell">
@@ -36,9 +36,9 @@
 
   <div class="container">
     <div class="stats">
-      <div class="stat-card urgent"><div class="num" id="urgentCount">0</div><div class="label">긴급</div></div>
-      <div class="stat-card normal"><div class="num" id="normalCount">0</div><div class="label">진행중</div></div>
-      <div class="stat-card done"><div class="num" id="doneCount">0</div><div class="label">완료</div></div>
+      <div class="stat-card urgent"><div class="num" id="urgentCount">0</div><div class="label" id="urgentLabel">긴급</div></div>
+      <div class="stat-card normal"><div class="num" id="normalCount">0</div><div class="label" id="normalLabel">진행중</div></div>
+      <div class="stat-card done"><div class="num" id="doneCount">0</div><div class="label" id="doneLabel">완료</div></div>
     </div>
 
     <div class="calendar-nav">
@@ -67,7 +67,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=5"></script>
+  <script src="js/api.js?v=8"></script>
   <script>
     let currentDate = new Date();
     let assignments = [];
@@ -79,7 +79,9 @@
       if (!user) return;
       await API.loadUserInfo();
       await API.initNotifications();
-      const data = await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
+      const data = user.is_admin
+        ? await API.getAssignments()
+        : await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
       if (data) assignments = data;
       renderCalendar();
     }
@@ -90,7 +92,11 @@
       const user = API.getUser();
 
       document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월`;
-      document.getElementById('classScope').textContent = user && user.grade && user.class_number ? `${user.grade}학년 ${user.class_number}반 과제` : '';
+      document.getElementById('classScope').textContent = user && user.is_admin
+        ? '전체 학년/반 과제'
+        : user && user.grade && user.class_number
+          ? `${user.grade}학년 ${user.class_number}반 과제`
+          : '';
 
       const firstDay = new Date(year, month, 1).getDay();
       const lastDate = new Date(year, month + 1, 0).getDate();
@@ -106,8 +112,11 @@
 
         let tags = '';
         dayTasks.sort((a, b) => a.is_completed === b.is_completed ? 0 : a.is_completed ? 1 : -1).forEach(a => {
-          const cls = a.is_completed ? 'done' : 'normal';
-          tags += `<div class="task-tag ${cls} task-item-el" data-id="${a.assignment_id}">${API.escapeHTML(a.title)}</div>`;
+          const cls = user && user.is_admin ? 'urgent' : a.is_completed ? 'done' : 'normal';
+          const label = user && user.is_admin
+            ? `${a.target_grade}학년 ${a.target_class}반 · ${a.title}`
+            : a.title;
+          tags += `<div class="task-tag ${cls} task-item-el" data-id="${a.assignment_id}">${API.escapeHTML(label)}</div>`;
         });
 
         html += `<div class="day${isToday ? ' today' : ''}" data-date="${dateStr}">
@@ -120,19 +129,36 @@
 
     function updateStats() {
       const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
       const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
+      const user = API.getUser();
+
+      if (user && user.is_admin) {
+        const urgent = assignments.filter(a => a.due_date <= twoDaysLater);
+        const normal = assignments.filter(a => a.due_date > twoDaysLater);
+        document.getElementById('urgentLabel').textContent = '임박';
+        document.getElementById('normalLabel').textContent = '이후';
+        document.getElementById('doneLabel').textContent = '전체';
+        document.getElementById('urgentCount').textContent = urgent.length;
+        document.getElementById('normalCount').textContent = normal.length;
+        document.getElementById('doneCount').textContent = assignments.length;
+        return;
+      }
+
       const urgent = assignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
       const normal = assignments.filter(a => !a.is_completed && a.due_date > twoDaysLater);
       const done = assignments.filter(a => a.is_completed);
+      document.getElementById('urgentLabel').textContent = '긴급';
+      document.getElementById('normalLabel').textContent = '진행중';
+      document.getElementById('doneLabel').textContent = '완료';
       document.getElementById('urgentCount').textContent = urgent.length;
       document.getElementById('normalCount').textContent = normal.length;
       document.getElementById('doneCount').textContent = done.length;
     }
 
     document.getElementById('calendarBody').addEventListener('click', async (e) => {
+      const user = API.getUser();
       const el = e.target.closest('.task-item-el');
-      if (el) {
+      if (el && !(user && user.is_admin)) {
         const id = parseInt(el.dataset.id);
         const task = assignments.find(a => a.assignment_id === id);
         if (!task) return;
@@ -150,17 +176,16 @@
         const dayTasks = assignments.filter(a => a.due_date === date);
         if (dayTasks.length === 0) return;
 
-        const user = API.getUser();
         document.getElementById('modalTitle').textContent = `${date} 과제`;
         let html = '';
         dayTasks.forEach(a => {
           html += `<div class="assignment-item${a.is_completed ? ' done' : ''}">
             <div class="info">
               <div class="title">${API.escapeHTML(a.title)}</div>
-              <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
+              <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${user && user.is_admin ? `${a.target_grade}학년 ${a.target_class}반` : a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
             </div>
             <div class="actions">
-              ${!a.is_completed ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}
+              ${!a.is_completed && !(user && user.is_admin) ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}
               ${user && a.created_by === user.id ? `<button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>` : ''}
             </div>
           </div>`;

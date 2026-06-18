@@ -89,7 +89,8 @@ const API = {
       grade: u.grade,
       class_number: u.class_number,
       profile_image_url: u.profile_image_url || null,
-      is_alarm_enabled: u.is_alarm_enabled
+      is_alarm_enabled: u.is_alarm_enabled,
+      is_admin: Boolean(u.is_admin)
     };
   },
 
@@ -127,6 +128,9 @@ const API = {
 
   getUserById(id) { return this.get(`/api/users/${id}`); },
   updateUser(id, data) { return this.put(`/api/users/${id}`, data); },
+  getAdminUsers() { return this.get('/api/admin/users'); },
+  updateAdminUser(id, data) { return this.put(`/api/admin/users/${id}`, data); },
+  deleteAdminUser(id) { return this.del(`/api/admin/users/${id}`); },
 
   async getNotifications() {
     const user = await this.ensureUser();
@@ -279,7 +283,11 @@ const API = {
     const user = this.normalizeUser(this.getUser());
     if (!user) return;
     const nameEl = document.getElementById('userName');
-    if (nameEl) nameEl.textContent = `${user.name || ''}${user.grade && user.class_number ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}`;
+    if (nameEl) {
+      nameEl.textContent = user.is_admin
+        ? `${user.name || ''} (관리자)`
+        : `${user.name || ''}${user.grade && user.class_number ? ' (' + user.grade + '학년 ' + user.class_number + '반)' : ''}`;
+    }
   }
 };
 window.API = API;

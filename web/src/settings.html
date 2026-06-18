@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
   <div class="app-shell">
@@ -67,11 +67,17 @@
         <h3>계정</h3>
         <button class="btn btn-secondary" onclick="API.logout()">로그아웃</button>
       </div>
+
+      <div class="settings-section" id="adminUserSection" style="display:none">
+        <h3>유저 관리</h3>
+        <p style="font-size:0.85rem;color:#666;margin-bottom:12px">관리자는 사용자 이름과 소속 학년/반을 수정하거나 계정을 삭제할 수 있습니다.</p>
+        <div id="adminUserList"><div class="empty-state">불러오는 중...</div></div>
+      </div>
     </div>
   </div>
   </div>
 
-  <script src="js/api.js?v=5"></script>
+  <script src="js/api.js?v=8"></script>
   <script>
     API.requireAuth();
 
@@ -81,6 +87,10 @@
       await API.loadUserInfo();
       await API.initNotifications();
       await loadProfile();
+      if (user.is_admin) {
+        document.getElementById('adminUserSection').style.display = 'block';
+        await loadAdminUsers();
+      }
     }
 
     async function loadProfile() {
@@ -88,7 +98,7 @@
       if (!data || data.error) return;
 
       document.getElementById('settingName').value = data.name;
-      document.getElementById('settingClass').value = `${data.grade}학년 ${data.class_number}반`;
+      document.getElementById('settingClass').value = data.is_admin ? '관리자 · 전체 학년/반 조회 가능' : `${data.grade}학년 ${data.class_number}반`;
 
       const avatar = document.getElementById('profileAvatar');
       avatar.textContent = '';
@@ -114,8 +124,53 @@
         user.name = data.name;
         user.grade = data.grade;
         user.class_number = data.class_number;
+        user.is_admin = Boolean(data.is_admin);
         API.setUser(user);
       }
+    }
+
+    function adminUserOptions(max, suffix, value) {
+      return Array.from({ length: max }, (_, i) => {
+        const optionValue = i + 1;
+        return `<option value="${optionValue}"${Number(value) === optionValue ? ' selected' : ''}>${optionValue}${suffix}</option>`;
+      }).join('');
+    }
+
+    async function loadAdminUsers() {
+      const res = await API.getAdminUsers();
+      const container = document.getElementById('adminUserList');
+      if (!Array.isArray(res)) {
+        container.innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '유저 목록을 불러오지 못했습니다.')}</div>`;
+        return;
+      }
+
+      container.innerHTML = res.map(user => `
+        <div class="admin-user-item" data-id="${user.user_id}">
+          <div class="admin-user-top">
+            <strong>${API.escapeHTML(user.name)}</strong>
+            <span class="admin-role-badge ${user.is_admin ? 'admin' : 'student'}">${user.is_admin ? '관리자' : '일반'}</span>
+          </div>
+          <div class="admin-user-grid">
+            <div class="form-group">
+              <label>이름</label>
+              <input type="text" class="admin-name-input" value="${API.escapeHTML(user.name)}">
+            </div>
+            <div class="form-group">
+              <label>학년</label>
+              <select class="admin-grade-select">${adminUserOptions(6, '학년', user.grade)}</select>
+            </div>
+            <div class="form-group">
+              <label>반</label>
+              <select class="admin-class-select">${adminUserOptions(30, '반', user.class_number)}</select>
+            </div>
+          </div>
+          <div class="admin-user-meta">생성일 ${new Date(user.created_at).toLocaleString('ko-KR')}</div>
+          <div class="admin-user-actions">
+            <button class="btn btn-primary btn-sm save-admin-user">저장</button>
+            ${user.is_admin ? '' : '<button class="btn btn-danger btn-sm delete-admin-user">삭제</button>'}
+          </div>
+        </div>
+      `).join('');
     }
 
     document.getElementById('saveProfileBtn').addEventListener('click', async () => {
@@ -138,6 +193,39 @@
       const newVal = !this.classList.contains('on');
       this.classList.toggle('on');
       await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
+    });
+
+    document.getElementById('adminUserList').addEventListener('click', async (e) => {
+      const item = e.target.closest('.admin-user-item');
+      if (!item) return;
+      const userId = parseInt(item.dataset.id, 10);
+      if (!userId) return;
+
+      if (e.target.classList.contains('save-admin-user')) {
+        const payload = {
+          name: item.querySelector('.admin-name-input').value.trim(),
+          grade: parseInt(item.querySelector('.admin-grade-select').value, 10),
+          class_number: parseInt(item.querySelector('.admin-class-select').value, 10)
+        };
+        const res = await API.updateAdminUser(userId, payload);
+        if (!res || res.error) {
+          alert(res?.error || '저장에 실패했습니다.');
+          return;
+        }
+        alert('유저 정보가 저장되었습니다.');
+        await loadAdminUsers();
+        return;
+      }
+
+      if (e.target.classList.contains('delete-admin-user')) {
+        if (!confirm('정말 이 계정을 삭제하시겠습니까?')) return;
+        const res = await API.deleteAdminUser(userId);
+        if (!res || res.error) {
+          alert(res?.error || '삭제에 실패했습니다.');
+          return;
+        }
+        await loadAdminUsers();
+      }
     });
 
     init();

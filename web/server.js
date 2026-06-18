@@ -12,6 +12,10 @@ const JWT_SECRET = process.env.JWT_SECRET || (!IS_PRODUCTION ? crypto.randomByte
 const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim() : null;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
+const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
+const ADMIN_CLASS = Number.parseInt(process.env.ADMIN_CLASS || '1', 10);
 const AUTH_COOKIE_NAME = 'assignment_alarm_session';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -49,6 +53,7 @@ const bootstrapSchema = [
     class_number INT NOT NULL,
     profile_image_url VARCHAR(500) DEFAULT NULL,
     is_alarm_enabled TINYINT(1) DEFAULT 1,
+    is_admin TINYINT(1) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS assignments (
@@ -138,7 +143,7 @@ function clearAuthCookie() {
 
 function createToken(user) {
   return jwt.sign(
-    { id: user.id || user.user_id, name: user.name, grade: user.grade, class_number: user.class_number },
+    { id: user.id || user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, is_admin: normalizeBooleanFlag(user.is_admin) },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -159,6 +164,10 @@ function parseInteger(value) {
 
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' ? 1 : 0;
+}
+
+function isAdminUser(user) {
+  return normalizeBooleanFlag(user?.is_admin) === 1;
 }
 
 function isValidDateOnly(value) {
@@ -198,8 +207,21 @@ function authMiddleware(req, res, next) {
 }
 
 async function getCurrentUser(userId) {
-  const [rows] = await pool.execute('SELECT user_id, name, grade, class_number FROM users WHERE user_id = ?', [userId]);
+  const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, is_admin FROM users WHERE user_id = ?', [userId]);
   return rows[0] || null;
+}
+
+async function ensureAdminAccess(req, res) {
+  const currentUser = await getCurrentUser(req.user.id);
+  if (!currentUser) {
+    res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    return null;
+  }
+  if (!isAdminUser(currentUser)) {
+    res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+    return null;
+  }
+  return currentUser;
 }
 
 async function verifyTurnstileToken(token, remoteIp) {
@@ -269,6 +291,46 @@ async function migrateSchema(conn) {
   if (nameUniqueIndexes.length === 0) {
     await conn.execute('ALTER TABLE users ADD UNIQUE INDEX users_name_unique (name)');
   }
+
+  const [adminColumns] = await conn.execute(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'users'
+       AND COLUMN_NAME = 'is_admin'`
+  );
+
+  if (adminColumns.length === 0) {
+    await conn.execute('ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0 AFTER is_alarm_enabled');
+  }
+}
+
+async function seedAdminAccount(conn) {
+  if (!ADMIN_NAME || !ADMIN_PASSWORD) return;
+  if (ADMIN_PASSWORD.length < 8) {
+    console.warn('Skipping admin bootstrap: ADMIN_PASSWORD must be at least 8 characters.');
+    return;
+  }
+
+  const adminGrade = Number.isInteger(ADMIN_GRADE) && ADMIN_GRADE >= 1 && ADMIN_GRADE <= 6 ? ADMIN_GRADE : 1;
+  const adminClass = Number.isInteger(ADMIN_CLASS) && ADMIN_CLASS >= 1 && ADMIN_CLASS <= 30 ? ADMIN_CLASS : 1;
+  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+  const [rows] = await conn.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [ADMIN_NAME]);
+
+  if (rows.length === 0) {
+    await conn.execute(
+      'INSERT INTO users (password, name, grade, class_number, is_admin) VALUES (?, ?, ?, ?, 1)',
+      [passwordHash, ADMIN_NAME, adminGrade, adminClass]
+    );
+    console.log(`Admin account created: ${ADMIN_NAME}`);
+    return;
+  }
+
+  await conn.execute(
+    'UPDATE users SET password = ?, grade = ?, class_number = ?, is_admin = 1 WHERE user_id = ?',
+    [passwordHash, adminGrade, adminClass, rows[0].user_id]
+  );
+  console.log(`Admin account synced: ${ADMIN_NAME}`);
 }
 
 // Auth
@@ -318,7 +380,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
     if (!await bcrypt.compare(password, user.password)) return res.status(401).json({ error: '이름 또는 비밀번호가 일치하지 않습니다.' });
     setAuthCookie(res, createToken(user));
     clearAuthRateLimit(req);
-    res.json({ user: { id: user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled } });
+    res.json({ user: { id: user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, profile_image_url: user.profile_image_url, is_alarm_enabled: user.is_alarm_enabled, is_admin: user.is_admin } });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -331,7 +393,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.user.id]);
+    const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin FROM users WHERE user_id = ?', [req.user.id]);
     if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     res.json(rows[0]);
   } catch {
@@ -342,10 +404,99 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 // Users
 app.get('/api/users/:id', authMiddleware, async (req, res) => {
   try {
-    if (parseInteger(req.params.id) !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
-    const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled FROM users WHERE user_id = ?', [req.params.id]);
+    const currentUser = await getCurrentUser(req.user.id);
+    if (!currentUser) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    const requestedUserId = parseInteger(req.params.id);
+    if (requestedUserId !== req.user.id && !isAdminUser(currentUser)) return res.status(403).json({ error: '권한이 없습니다.' });
+    const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin FROM users WHERE user_id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     res.json(rows[0]);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.get('/api/admin/users', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await ensureAdminAccess(req, res);
+    if (!adminUser) return;
+    const [rows] = await pool.execute(
+      'SELECT user_id, name, grade, class_number, is_alarm_enabled, is_admin, created_at FROM users ORDER BY is_admin DESC, grade ASC, class_number ASC, name ASC'
+    );
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.put('/api/admin/users/:id', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await ensureAdminAccess(req, res);
+    if (!adminUser) return;
+    const targetUserId = parseInteger(req.params.id);
+    if (!targetUserId) return res.status(400).json({ error: '사용자 정보가 올바르지 않습니다.' });
+
+    const [targetRows] = await pool.execute('SELECT user_id FROM users WHERE user_id = ? LIMIT 1', [targetUserId]);
+    if (targetRows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+
+    if (req.body.name !== undefined) {
+      const name = normalizeName(req.body.name);
+      if (!name) return res.status(400).json({ error: '이름을 입력해주세요.' });
+      if (name.length < 2 || name.length > 30) return res.status(400).json({ error: '이름은 2자 이상 30자 이하로 입력해주세요.' });
+      const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? AND user_id <> ? LIMIT 1', [name, targetUserId]);
+      if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
+      req.body.name = name;
+    }
+
+    if (req.body.grade !== undefined) {
+      const grade = parseInteger(req.body.grade);
+      if (!grade || grade < 1 || grade > 6) return res.status(400).json({ error: '학년 값이 올바르지 않습니다.' });
+      req.body.grade = grade;
+    }
+
+    if (req.body.class_number !== undefined) {
+      const classNumber = parseInteger(req.body.class_number);
+      if (!classNumber || classNumber < 1 || classNumber > 30) return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
+      req.body.class_number = classNumber;
+    }
+
+    if (req.body.is_alarm_enabled !== undefined) {
+      req.body.is_alarm_enabled = normalizeBooleanFlag(req.body.is_alarm_enabled);
+    }
+
+    const allowed = ['name', 'grade', 'class_number', 'is_alarm_enabled'];
+    const updates = [];
+    const values = [];
+    for (const field of allowed) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        values.push(req.body[field]);
+      }
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
+    values.push(targetUserId);
+    await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`, values);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await ensureAdminAccess(req, res);
+    if (!adminUser) return;
+    const targetUserId = parseInteger(req.params.id);
+    if (!targetUserId) return res.status(400).json({ error: '사용자 정보가 올바르지 않습니다.' });
+    if (targetUserId === req.user.id) return res.status(400).json({ error: '본인 계정은 삭제할 수 없습니다.' });
+
+    const [rows] = await pool.execute('SELECT is_admin FROM users WHERE user_id = ? LIMIT 1', [targetUserId]);
+    if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (isAdminUser(rows[0])) return res.status(400).json({ error: '관리자 계정은 삭제할 수 없습니다.' });
+
+    await pool.execute('DELETE FROM users WHERE user_id = ?', [targetUserId]);
+    res.json({ success: true });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -388,6 +539,12 @@ app.get('/api/assignments', authMiddleware, async (req, res) => {
   try {
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (isAdminUser(user)) {
+      const [rows] = await pool.execute(
+        'SELECT a.*, u.name AS creator_name FROM assignments a JOIN users u ON a.created_by = u.user_id ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC'
+      );
+      return res.json(rows);
+    }
     const [rows] = await pool.execute(
       'SELECT a.*, u.name AS creator_name FROM assignments a JOIN users u ON a.created_by = u.user_id WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL) ORDER BY a.due_date ASC',
       [user.grade, user.class_number]
@@ -488,6 +645,7 @@ app.put('/api/user-assignments', authMiddleware, async (req, res) => {
     if (!assignmentId) return res.status(400).json({ error: '과제 정보가 올바르지 않습니다.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (isAdminUser(user)) return res.status(403).json({ error: '관리자 계정은 완료 처리를 할 수 없습니다.' });
     const [allowedRows] = await pool.execute(
       'SELECT assignment_id FROM assignments WHERE assignment_id = ? AND target_grade = ? AND (target_class = ? OR target_class IS NULL) LIMIT 1',
       [assignmentId, user.grade, user.class_number]
@@ -510,6 +668,12 @@ app.get('/api/users/:userId/assignments', authMiddleware, async (req, res) => {
     if (userId !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (isAdminUser(user)) {
+      const [rows] = await pool.execute(
+        'SELECT a.*, u.name AS creator_name, 0 AS is_completed FROM assignments a JOIN users u ON a.created_by = u.user_id ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC'
+      );
+      return res.json(rows);
+    }
     const [rows] = await pool.execute(
       'SELECT a.*, u.name AS creator_name, COALESCE(ua.is_completed, 0) AS is_completed FROM assignments a JOIN users u ON a.created_by = u.user_id LEFT JOIN user_assignments ua ON a.assignment_id = ua.assignment_id AND ua.user_id = ? WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL) ORDER BY a.due_date ASC',
       [userId, user.grade, user.class_number]
@@ -527,6 +691,17 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     const type = req.query.type ? String(req.query.type) : null;
     if (type && !['grade', 'class'].includes(type)) return res.status(400).json({ error: '메세지 유형이 올바르지 않습니다.' });
+    if (isAdminUser(user)) {
+      let sql = 'SELECT m.*, u.name AS sender_name FROM messages m JOIN users u ON m.sender_id = u.user_id';
+      const params = [];
+      if (type) {
+        sql += ' WHERE m.type = ?';
+        params.push(type);
+      }
+      sql += ' ORDER BY m.created_at DESC';
+      const [rows] = await pool.execute(sql, params);
+      return res.json(rows);
+    }
     let sql = 'SELECT m.*, u.name AS sender_name FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE m.target_grade = ? AND ((m.type = ? AND m.target_class IS NULL) OR (m.type = ? AND m.target_class = ?))';
     const params = [user.grade, 'grade', 'class', user.class_number];
     if (type) {
@@ -550,8 +725,21 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     if (content.length > 1000) return res.status(400).json({ error: '메세지는 1000자 이하로 입력해주세요.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    const target_grade = user.grade;
-    const target_class = type === 'class' ? user.class_number : null;
+    let target_grade = user.grade;
+    let target_class = type === 'class' ? user.class_number : null;
+
+    if (type === 'grade') {
+      if (!isAdminUser(user)) return res.status(403).json({ error: '학년 메세지는 관리자만 보낼 수 있습니다.' });
+      target_grade = parseInteger(req.body.target_grade);
+      if (!target_grade || target_grade < 1 || target_grade > 6) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+      target_class = null;
+    } else if (isAdminUser(user)) {
+      target_grade = parseInteger(req.body.target_grade);
+      target_class = parseInteger(req.body.target_class);
+      if (!target_grade || target_grade < 1 || target_grade > 6) return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+      if (!target_class || target_class < 1 || target_class > 30) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
+    }
+
     const [result] = await pool.execute('INSERT INTO messages (sender_id, content, type, target_grade, target_class) VALUES (?, ?, ?, ?, ?)', [req.user.id, content, type, target_grade, target_class || null]);
     res.json({ message_id: result.insertId, success: true });
   } catch {
@@ -563,7 +751,9 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT sender_id FROM messages WHERE message_id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: '메세지를 찾을 수 없습니다.' });
-    if (rows[0].sender_id !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+    const user = await getCurrentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (rows[0].sender_id !== req.user.id && !isAdminUser(user)) return res.status(403).json({ error: '권한이 없습니다.' });
     await pool.execute('DELETE FROM messages WHERE message_id = ?', [req.params.id]);
     res.json({ success: true });
   } catch {
@@ -586,6 +776,7 @@ async function init() {
         await conn.execute(statement);
       }
       await migrateSchema(conn);
+      await seedAdminAccount(conn);
       conn.release();
       console.log(`MySQL connected: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
       app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

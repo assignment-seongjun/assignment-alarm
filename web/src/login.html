@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 로그인</title>
-  <link rel="stylesheet" href="css/style.css?v=8">
+  <link rel="stylesheet" href="css/style.css?v=9">
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
 <body class="login-page">
@@ -71,7 +71,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=7"></script>
+  <script src="js/api.js?v=8"></script>
   <script>
     let turnstileSiteKey = null;
     let turnstileWidgetId = null;
@@ -195,7 +195,7 @@
 
     API.me().then(data => {
       if (data && data.user_id) {
-        API.setUser({ id: data.user_id, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled });
+        API.setUser({ id: data.user_id, name: data.name, grade: data.grade, class_number: data.class_number, profile_image_url: data.profile_image_url, is_alarm_enabled: data.is_alarm_enabled, is_admin: data.is_admin });
         window.location.href = 'calendar.html';
       }
     }).catch(() => {});
