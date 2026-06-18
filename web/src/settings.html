@@ -132,7 +132,20 @@
       messages: []
     };
 
+    function resetRoleSensitiveUi() {
+      const userName = document.getElementById('userName');
+      if (userName) userName.textContent = '';
+
+      document.getElementById('adminAssignmentSection').style.display = 'none';
+      document.getElementById('adminMessageSection').style.display = 'none';
+      document.getElementById('adminUserSection').style.display = 'none';
+      document.getElementById('adminAssignmentList').innerHTML = '<div class="empty-state">불러오는 중...</div>';
+      document.getElementById('adminMessageList').innerHTML = '<div class="empty-state">불러오는 중...</div>';
+      document.getElementById('adminUserList').innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    }
+
     async function init() {
+      resetRoleSensitiveUi();
       const user = await API.ensureUser();
       if (!user) return;
       await API.loadUserInfo();
@@ -442,6 +455,12 @@
     document.getElementById('adminSettingsMessageClass').addEventListener('change', (e) => {
       adminSettingsState.messageClass = e.target.value;
       renderAdminMessages();
+    });
+
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        init();
+      }
     });
 
     init();
