@@ -232,26 +232,6 @@ async function findUserByGoogleSub(googleSub) {
   return rows[0] || null;
 }
 
-async function buildUniqueName(baseName, excludeUserId = null) {
-  const base = normalizeGoogleName(baseName);
-  let candidate = base;
-  let suffix = 2;
-
-  while (true) {
-    const params = excludeUserId ? [candidate, excludeUserId] : [candidate];
-    const sql = excludeUserId
-      ? 'SELECT user_id FROM users WHERE name = ? AND user_id <> ? LIMIT 1'
-      : 'SELECT user_id FROM users WHERE name = ? LIMIT 1';
-    const [rows] = await pool.execute(sql, params);
-    if (rows.length === 0) return candidate;
-
-    const suffixText = ` ${suffix}`;
-    const trimmedBase = base.slice(0, Math.max(2, 30 - suffixText.length)).trim();
-    candidate = `${trimmedBase}${suffixText}`;
-    suffix += 1;
-  }
-}
-
 function authRateLimit(req, res, next) {
   const key = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
@@ -569,7 +549,7 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
       });
     }
 
-    const uniqueName = await buildUniqueName(decoded.profile.name);
+    const uniqueName = normalizeGoogleName(decoded.profile.name);
     const passwordHash = await bcrypt.hash(`google:${decoded.profile.google_sub}:${crypto.randomBytes(8).toString('hex')}`, 10);
     const [result] = await pool.execute(
       'INSERT INTO users (password, name, google_sub, google_email, grade, class_number, profile_image_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
