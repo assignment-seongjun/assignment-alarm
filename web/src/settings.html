@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
-  <link rel="stylesheet" href="css/style.css?v=17">
+  <link rel="stylesheet" href="css/style.css?v=18">
 </head>
 <body>
   <div class="app-shell">
@@ -118,7 +118,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=8"></script>
+  <script src="js/api.js?v=9"></script>
   <script>
     API.requireAuth();
 
@@ -129,7 +129,10 @@
       messageGrade: 'all',
       messageClass: 'all',
       assignments: [],
-      messages: []
+      messages: [],
+      assignmentStatusById: {},
+      assignmentStatusLoading: {},
+      assignmentStatusOpen: {}
     };
 
     async function init() {
@@ -234,6 +237,52 @@
       });
     }
 
+    function pruneAssignmentStatusCache() {
+      const validIds = new Set(adminSettingsState.assignments.map(assignment => String(assignment.assignment_id)));
+      ['assignmentStatusById', 'assignmentStatusLoading', 'assignmentStatusOpen'].forEach(key => {
+        Object.keys(adminSettingsState[key]).forEach(id => {
+          if (!validIds.has(id)) delete adminSettingsState[key][id];
+        });
+      });
+    }
+
+    function renderAssignmentStatusPanel(assignmentId) {
+      if (!adminSettingsState.assignmentStatusOpen[assignmentId]) return '';
+
+      if (adminSettingsState.assignmentStatusLoading[assignmentId]) {
+        return '<div class="assignment-status-panel"><div class="assignment-status-empty">불러오는 중...</div></div>';
+      }
+
+      const statusData = adminSettingsState.assignmentStatusById[assignmentId];
+      if (!statusData) return '';
+
+      if (statusData.error) {
+        return `<div class="assignment-status-panel"><div class="assignment-status-empty">${API.escapeHTML(statusData.error)}</div></div>`;
+      }
+
+      if (!Array.isArray(statusData.students) || statusData.students.length === 0) {
+        return '<div class="assignment-status-panel"><div class="assignment-status-empty">대상 학생이 없습니다.</div></div>';
+      }
+
+      return `
+        <div class="assignment-status-panel">
+          <div class="assignment-status-list">
+            ${statusData.students.map(student => `
+              <div class="assignment-status-item">
+                <div>
+                  <div class="assignment-status-name">${API.escapeHTML(student.name)}</div>
+                  <div class="assignment-status-meta">${API.escapeHTML(student.grade)}학년 ${API.escapeHTML(student.class_number)}반</div>
+                </div>
+                <span class="assignment-status-badge ${Number(student.is_completed) === 1 ? 'done' : 'pending'}">
+                  ${Number(student.is_completed) === 1 ? '완료' : '미완료'}
+                </span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
     function renderAdminAssignments() {
       const container = document.getElementById('adminAssignmentList');
       const assignments = getVisibleAdminAssignments();
@@ -242,18 +291,32 @@
         return;
       }
 
-      container.innerHTML = assignments.map(assignment => `
-        <div class="assignment-item">
-          <div class="info">
-            <div class="title">${API.escapeHTML(assignment.title)}</div>
-            ${assignment.content ? `<div class="detail">${API.escapeHTML(assignment.content)}</div>` : ''}
-            <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
+      container.innerHTML = assignments.map(assignment => {
+        const statusData = adminSettingsState.assignmentStatusById[assignment.assignment_id];
+        const isOpen = Boolean(adminSettingsState.assignmentStatusOpen[assignment.assignment_id]);
+        const completedCount = Array.isArray(statusData?.students)
+          ? statusData.students.filter(student => Number(student.is_completed) === 1).length
+          : null;
+        const pendingCount = Array.isArray(statusData?.students)
+          ? statusData.students.length - completedCount
+          : null;
+
+        return `
+          <div class="assignment-item assignment-admin-item">
+            <div class="info">
+              <div class="title">${API.escapeHTML(assignment.title)}</div>
+              ${assignment.content ? `<div class="detail">${API.escapeHTML(assignment.content)}</div>` : ''}
+              <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
+              ${completedCount === null ? '' : `<div class="admin-user-meta">완료 ${completedCount}명 · 미완료 ${pendingCount}명</div>`}
+              ${renderAssignmentStatusPanel(assignment.assignment_id)}
+            </div>
+            <div class="actions">
+              <button class="btn btn-secondary btn-sm toggle-assignment-status" data-id="${assignment.assignment_id}">${isOpen ? '현황 숨기기' : '현황 보기'}</button>
+              <button class="btn btn-danger btn-sm delete-admin-assignment" data-id="${assignment.assignment_id}">삭제</button>
+            </div>
           </div>
-          <div class="actions">
-            <button class="btn btn-danger btn-sm delete-admin-assignment" data-id="${assignment.assignment_id}">삭제</button>
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     function renderAdminMessages() {
@@ -285,6 +348,37 @@
     async function loadAdminAssignments() {
       const res = await API.getAssignments();
       adminSettingsState.assignments = Array.isArray(res) ? res : [];
+      pruneAssignmentStatusCache();
+      renderAdminAssignments();
+    }
+
+    async function toggleAssignmentStatusView(assignmentId) {
+      if (!assignmentId) return;
+
+      if (adminSettingsState.assignmentStatusOpen[assignmentId]) {
+        adminSettingsState.assignmentStatusOpen[assignmentId] = false;
+        renderAdminAssignments();
+        return;
+      }
+
+      adminSettingsState.assignmentStatusOpen[assignmentId] = true;
+
+      if (!adminSettingsState.assignmentStatusById[assignmentId]) {
+        adminSettingsState.assignmentStatusLoading[assignmentId] = true;
+        renderAdminAssignments();
+
+        const res = await API.getAssignmentStatus(assignmentId);
+        if (!res || res.error) {
+          adminSettingsState.assignmentStatusById[assignmentId] = {
+            error: res?.error || '완료 현황을 불러오지 못했습니다.',
+            students: []
+          };
+        } else {
+          adminSettingsState.assignmentStatusById[assignmentId] = res;
+        }
+        adminSettingsState.assignmentStatusLoading[assignmentId] = false;
+      }
+
       renderAdminAssignments();
     }
 
@@ -387,9 +481,16 @@
     });
 
     document.getElementById('adminAssignmentList').addEventListener('click', async (e) => {
-      if (!e.target.classList.contains('delete-admin-assignment')) return;
+      const toggleButton = e.target.closest('.toggle-assignment-status');
+      if (toggleButton) {
+        await toggleAssignmentStatusView(parseInt(toggleButton.dataset.id, 10));
+        return;
+      }
+
+      const deleteButton = e.target.closest('.delete-admin-assignment');
+      if (!deleteButton) return;
       if (!confirm('정말 이 과제를 삭제하시겠습니까?')) return;
-      const res = await API.deleteAssignment(parseInt(e.target.dataset.id, 10));
+      const res = await API.deleteAssignment(parseInt(deleteButton.dataset.id, 10));
       if (!res || res.error) {
         alert(res?.error || '과제 삭제에 실패했습니다.');
         return;

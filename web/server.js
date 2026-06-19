@@ -876,6 +876,43 @@ app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/assignments/:id/status', authMiddleware, async (req, res) => {
+  try {
+    const assignmentId = parseInteger(req.params.id);
+    if (!assignmentId) return res.status(400).json({ error: '과제 정보가 올바르지 않습니다.' });
+
+    const user = await getCurrentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (!isAdminUser(user)) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+
+    const [assignmentRows] = await pool.execute(
+      'SELECT assignment_id, title, target_grade, target_class FROM assignments WHERE assignment_id = ? LIMIT 1',
+      [assignmentId]
+    );
+    if (assignmentRows.length === 0) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
+
+    const assignment = assignmentRows[0];
+    const [students] = await pool.execute(
+      `SELECT u.user_id, u.name, u.grade, u.class_number, COALESCE(ua.is_completed, 0) AS is_completed
+       FROM users u
+       LEFT JOIN user_assignments ua
+         ON ua.user_id = u.user_id AND ua.assignment_id = ?
+       WHERE u.is_admin = 0
+         AND u.grade = ?
+         AND (? IS NULL OR u.class_number = ?)
+       ORDER BY u.class_number ASC, u.name ASC`,
+      [assignmentId, assignment.target_grade, assignment.target_class, assignment.target_class]
+    );
+
+    res.json({
+      assignment,
+      students
+    });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
 app.delete('/api/assignments/:id', authMiddleware, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT created_by FROM assignments WHERE assignment_id = ?', [req.params.id]);

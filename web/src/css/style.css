@@ -182,6 +182,16 @@ a { text-decoration: none; color: inherit; }
 .assignment-item .info .detail { margin-top: 6px; font-size: 0.9rem; color: #555; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .assignment-item .info .meta { font-size: 0.8rem; color: #999; margin-top: 3px; }
 .assignment-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+.assignment-admin-item { align-items: flex-start; }
+.assignment-status-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid #ececf2; }
+.assignment-status-list { display: grid; gap: 8px; }
+.assignment-status-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: #f6f8fc; }
+.assignment-status-name { font-size: 0.92rem; font-weight: 600; color: #1a1a2e; }
+.assignment-status-meta { margin-top: 3px; font-size: 0.78rem; color: #7a7a88; }
+.assignment-status-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 68px; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+.assignment-status-badge.done { background: rgba(46, 204, 113, 0.16); color: #168148; }
+.assignment-status-badge.pending { background: rgba(255, 107, 107, 0.14); color: #c0392b; }
+.assignment-status-empty { font-size: 0.85rem; color: #777; }
 .assignment-item.done .title { text-decoration: line-through; color: #999; }
 .completed-badge { color: #2ecc71; font-size: 1.2rem; }
 

@@ -111,6 +111,7 @@ const API = {
   },
 
   getAssignments() { return this.get('/api/assignments'); },
+  getAssignmentStatus(id) { return this.get(`/api/assignments/${id}/status`); },
   createAssignment(data) { return this.post('/api/assignments', data); },
   updateAssignment(id, data) { return this.put(`/api/assignments/${id}`, data); },
   deleteAssignment(id) { return this.del(`/api/assignments/${id}`); },
