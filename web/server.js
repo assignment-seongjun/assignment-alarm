@@ -201,8 +201,15 @@ function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' ? 1 : 0;
 }
 
+function isTeacherAdminEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  const [localPart = '', domain = ''] = normalized.split('@');
+  return domain === GOOGLE_ALLOWED_DOMAIN && localPart.includes('teacher');
+}
+
 function isAdminEmail(email) {
-  return ADMIN_GOOGLE_EMAILS.includes(String(email || '').trim().toLowerCase());
+  const normalized = String(email || '').trim().toLowerCase();
+  return ADMIN_GOOGLE_EMAILS.includes(normalized) || isTeacherAdminEmail(normalized);
 }
 
 function isAdminUser(user) {
@@ -417,6 +424,15 @@ async function migrateSchema(conn) {
 }
 
 async function seedAdminAccount(conn) {
+  const [teacherRows] = await conn.execute(
+    'SELECT user_id, google_email FROM users WHERE google_email LIKE ?',
+    [`%teacher%@${GOOGLE_ALLOWED_DOMAIN}`]
+  );
+  for (const row of teacherRows) {
+    await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [row.user_id]);
+    console.log(`Admin account synced by teacher email rule: ${row.google_email}`);
+  }
+
   if (ADMIN_GOOGLE_EMAILS.length > 0) {
     const placeholders = ADMIN_GOOGLE_EMAILS.map(() => '?').join(', ');
     const [googleRows] = await conn.execute(
