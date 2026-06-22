@@ -79,7 +79,6 @@ const bootstrapSchema = [
     assignment_id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     content TEXT,
-    attachment_url VARCHAR(1000) DEFAULT NULL,
     due_date DATE NOT NULL,
     target_grade INT NOT NULL,
     target_class INT DEFAULT NULL,
@@ -219,27 +218,6 @@ function isAdminUser(user) {
 
 function isValidDateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
-}
-
-function normalizeAttachmentUrl(value) {
-  if (value === undefined || value === null || String(value).trim() === '') return null;
-  const normalized = String(value).trim();
-  if (normalized.length > 1000) {
-    throw new Error('attachment-url-too-long');
-  }
-
-  let parsed;
-  try {
-    parsed = new URL(normalized);
-  } catch {
-    throw new Error('attachment-url-invalid');
-  }
-
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('attachment-url-invalid');
-  }
-
-  return parsed.toString();
 }
 
 async function verifyGoogleCredential(credential) {
@@ -452,8 +430,8 @@ async function migrateSchema(conn) {
        AND COLUMN_NAME = 'attachment_url'`
   );
 
-  if (assignmentAttachmentColumns.length === 0) {
-    await conn.execute('ALTER TABLE assignments ADD COLUMN attachment_url VARCHAR(1000) DEFAULT NULL AFTER content');
+  if (assignmentAttachmentColumns.length > 0) {
+    await conn.execute('ALTER TABLE assignments DROP COLUMN attachment_url');
   }
 }
 
@@ -847,20 +825,11 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
   try {
     const title = String(req.body.title || '').trim();
     const content = req.body.content === undefined || req.body.content === null ? null : String(req.body.content).trim();
-    let attachmentUrl = null;
     const due_date = String(req.body.due_date || '');
     if (!title || !due_date) return res.status(400).json({ error: '과제명과 마감일은 필수입니다.' });
     if (title.length > 120) return res.status(400).json({ error: '과제명은 120자 이하로 입력해주세요.' });
     if (content && content.length > 2000) return res.status(400).json({ error: '과제 내용은 2000자 이하로 입력해주세요.' });
     if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });
-    try {
-      attachmentUrl = normalizeAttachmentUrl(req.body.attachment_url);
-    } catch (error) {
-      const message = error?.message === 'attachment-url-too-long'
-        ? '첨부 링크는 1000자 이하로 입력해주세요.'
-        : '첨부 링크 형식이 올바르지 않습니다.';
-      return res.status(400).json({ error: message });
-    }
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     let target_grade = user.grade;
@@ -874,8 +843,8 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO assignments (title, content, attachment_url, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [title, content || null, attachmentUrl, due_date, target_grade, target_class || null, req.user.id]
+      'INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [title, content || null, due_date, target_grade, target_class || null, req.user.id]
     );
     const assignmentId = result.insertId;
     const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND class_number = ?', [target_grade, target_class]);
@@ -916,19 +885,6 @@ app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
       if (normalizedContent && normalizedContent.length > 2000) return res.status(400).json({ error: '과제 내용은 2000자 이하로 입력해주세요.' });
       updates.push('content = ?');
       values.push(normalizedContent);
-    }
-    if (req.body.attachment_url !== undefined) {
-      let attachmentUrl = null;
-      try {
-        attachmentUrl = normalizeAttachmentUrl(req.body.attachment_url);
-      } catch (error) {
-        const message = error?.message === 'attachment-url-too-long'
-          ? '첨부 링크는 1000자 이하로 입력해주세요.'
-          : '첨부 링크 형식이 올바르지 않습니다.';
-        return res.status(400).json({ error: message });
-      }
-      updates.push('attachment_url = ?');
-      values.push(attachmentUrl);
     }
     if (due_date !== undefined) {
       if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });

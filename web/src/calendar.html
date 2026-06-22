@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
   <div class="app-shell">
@@ -73,7 +73,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=8"></script>
+  <script src="js/api.js?v=10"></script>
   <script>
     let currentDate = new Date();
     let assignments = [];
@@ -172,11 +172,6 @@
       updateStats(visibleAssignments);
     }
 
-    function renderAttachmentLink(url) {
-      if (!url) return '';
-      return `<div class="assignment-link-wrap"><a class="assignment-link" href="${API.escapeHTML(url)}" target="_blank" rel="noopener noreferrer">첨부 링크 열기</a></div>`;
-    }
-
     function updateStats(visibleAssignments) {
       const today = new Date();
       const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
@@ -218,8 +213,7 @@
           html += `<div class="assignment-item${a.is_completed ? ' done' : ''}">
             <div class="info">
               <div class="title">${API.escapeHTML(a.title)}</div>
-              ${a.content ? `<div class="detail">${API.escapeHTML(a.content)}</div>` : ''}
-              ${renderAttachmentLink(a.attachment_url)}
+              ${a.content ? `<div class="detail">${API.renderTextWithLinks(a.content)}</div>` : ''}
               <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${user && user.is_admin ? `${a.target_grade}학년 ${a.target_class}반` : a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
             </div>
             <div class="actions">

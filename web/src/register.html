@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 과제 등록</title>
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
   <div class="app-shell">
@@ -51,10 +51,6 @@
           <input type="date" id="taskDate" required>
         </div>
         <div class="form-group">
-          <label>첨부 링크</label>
-          <input type="url" id="taskAttachmentUrl" placeholder="https://...">
-        </div>
-        <div class="form-group">
           <label>등록 대상</label>
           <input type="text" id="targetScope" readonly>
         </div>
@@ -89,7 +85,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=9"></script>
+  <script src="js/api.js?v=10"></script>
   <script>
     API.requireAuth();
     let adminGradeFilter = 'all';
@@ -151,11 +147,6 @@
       });
     }
 
-    function renderAttachmentLink(url) {
-      if (!url) return '';
-      return `<div class="assignment-link-wrap"><a class="assignment-link" href="${API.escapeHTML(url)}" target="_blank" rel="noopener noreferrer">첨부 링크 열기</a></div>`;
-    }
-
     function resetAssignmentForm() {
       editingAssignmentId = null;
       document.getElementById('assignmentFormTitle').textContent = '새 과제 등록';
@@ -163,7 +154,6 @@
       document.getElementById('cancelEditBtn').style.display = 'none';
       document.getElementById('taskTitle').value = '';
       document.getElementById('taskContent').value = '';
-      document.getElementById('taskAttachmentUrl').value = '';
       document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
 
       const user = API.getUser();
@@ -180,7 +170,6 @@
       document.getElementById('cancelEditBtn').style.display = 'inline-flex';
       document.getElementById('taskTitle').value = assignment.title || '';
       document.getElementById('taskContent').value = assignment.content || '';
-      document.getElementById('taskAttachmentUrl').value = assignment.attachment_url || '';
       document.getElementById('taskDate').value = assignment.due_date || '';
 
       const user = API.getUser();
@@ -206,8 +195,7 @@
         <div class="assignment-item">
           <div class="info">
             <div class="title">${API.escapeHTML(a.title)}</div>
-            ${a.content ? `<div class="detail">${API.escapeHTML(a.content)}</div>` : ''}
-            ${renderAttachmentLink(a.attachment_url)}
+            ${a.content ? `<div class="detail">${API.renderTextWithLinks(a.content)}</div>` : ''}
             <div class="meta">${API.escapeHTML(a.due_date)} · ${API.escapeHTML(a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체')} · ${API.escapeHTML(a.creator_name || '')}</div>
           </div>
           <div class="actions">
@@ -222,12 +210,11 @@
       const title = document.getElementById('taskTitle').value.trim();
       const content = document.getElementById('taskContent').value.trim();
       const due_date = document.getElementById('taskDate').value;
-      const attachment_url = document.getElementById('taskAttachmentUrl').value.trim();
 
       if (!title || !due_date) { alert('과제명과 마감일을 입력해주세요.'); return; }
 
       const user = API.getUser();
-      const payload = { title, content: content || null, due_date, attachment_url: attachment_url || null };
+      const payload = { title, content: content || null, due_date };
       if (user && user.is_admin) {
         payload.target_grade = parseInt(document.getElementById('adminTargetGrade').value, 10);
         payload.target_class = parseInt(document.getElementById('adminTargetClass').value, 10);

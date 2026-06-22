@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=20">
 </head>
 <body>
   <div class="app-shell">
@@ -118,7 +118,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=9"></script>
+  <script src="js/api.js?v=10"></script>
   <script>
     API.requireAuth();
 
@@ -247,11 +247,6 @@
       });
     }
 
-    function renderAttachmentLink(url) {
-      if (!url) return '';
-      return `<div class="assignment-link-wrap"><a class="assignment-link" href="${API.escapeHTML(url)}" target="_blank" rel="noopener noreferrer">첨부 링크 열기</a></div>`;
-    }
-
     function renderAssignmentStatusPanel(assignmentId) {
       if (!adminSettingsState.assignmentStatusOpen[assignmentId]) return '';
 
@@ -323,8 +318,7 @@
           <div class="assignment-item assignment-admin-item">
             <div class="info">
               <div class="title">${API.escapeHTML(assignment.title)}</div>
-              ${assignment.content ? `<div class="detail">${API.escapeHTML(assignment.content)}</div>` : ''}
-              ${renderAttachmentLink(assignment.attachment_url)}
+              ${assignment.content ? `<div class="detail">${API.renderTextWithLinks(assignment.content)}</div>` : ''}
               <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
               ${completedCount === null ? '' : `<div class="admin-user-meta">완료 ${completedCount}명 · 미완료 ${pendingCount}명</div>`}
               ${renderAssignmentStatusPanel(assignment.assignment_id)}

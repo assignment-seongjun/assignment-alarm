@@ -33,6 +33,31 @@ const API = {
       .replace(/'/g, '&#39;');
   },
 
+  renderTextWithLinks(value) {
+    const text = String(value ?? '');
+    if (!text) return '';
+
+    const urlPattern = /(https?:\/\/[^\s<]+)/g;
+    return text.split(urlPattern).map(part => {
+      if (!part) return '';
+      if (!/^https?:\/\//.test(part)) {
+        return this.escapeHTML(part);
+      }
+
+      try {
+        const url = new URL(part);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          return this.escapeHTML(part);
+        }
+        const safeHref = this.escapeHTML(url.toString());
+        const safeLabel = this.escapeHTML(part);
+        return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
+      } catch {
+        return this.escapeHTML(part);
+      }
+    }).join('');
+  },
+
   isLoginPage() {
     return window.location.pathname.endsWith('/login.html') || window.location.pathname === '/' || window.location.pathname === '';
   },
