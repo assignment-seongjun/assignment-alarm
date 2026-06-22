@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 과제 등록</title>
-  <link rel="stylesheet" href="css/style.css?v=20">
+  <link rel="stylesheet" href="css/style.css?v=21">
 </head>
 <body>
   <div class="app-shell">
@@ -45,6 +45,14 @@
         <div class="form-group">
           <label>상세 내용</label>
           <textarea id="taskContent" placeholder="과제에 대한 설명을 입력하세요 (선택)"></textarea>
+          <div class="content-helper">
+            <div class="content-helper-text">링크는 자동으로 연결되고, 이미지는 붙여넣기나 파일 선택으로 추가됩니다.</div>
+            <div class="content-helper-actions">
+              <button class="btn btn-secondary btn-sm" type="button" id="insertImageBtn">이미지 추가</button>
+              <span class="content-upload-status" id="taskContentUploadStatus" aria-live="polite"></span>
+            </div>
+            <input type="file" id="taskImageInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+          </div>
         </div>
         <div class="form-group">
           <label>마감일</label>
@@ -85,12 +93,13 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=10"></script>
+  <script src="js/api.js?v=11"></script>
   <script>
     API.requireAuth();
     let adminGradeFilter = 'all';
     let adminClassFilter = 'all';
     let editingAssignmentId = null;
+    let isUploadingTaskImage = false;
 
     async function init() {
       const user = await API.ensureUser();
@@ -147,6 +156,59 @@
       });
     }
 
+    function setUploadStatus(message, isError = false) {
+      const status = document.getElementById('taskContentUploadStatus');
+      status.textContent = message || '';
+      status.classList.toggle('error', Boolean(isError && message));
+    }
+
+    function insertTextAtCursor(element, text) {
+      const start = element.selectionStart ?? element.value.length;
+      const end = element.selectionEnd ?? element.value.length;
+      const currentValue = element.value;
+      element.value = `${currentValue.slice(0, start)}${text}${currentValue.slice(end)}`;
+      const nextPosition = start + text.length;
+      element.focus();
+      element.setSelectionRange(nextPosition, nextPosition);
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('file-read-failed'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadImagesToContent(files) {
+      if (isUploadingTaskImage) return;
+      const imageFiles = Array.from(files || []).filter(file => file && String(file.type || '').startsWith('image/'));
+      if (imageFiles.length === 0) return;
+
+      const contentField = document.getElementById('taskContent');
+      isUploadingTaskImage = true;
+      setUploadStatus('이미지 업로드 중...');
+
+      try {
+        for (const file of imageFiles) {
+          const dataUrl = await readFileAsDataUrl(file);
+          const result = await API.uploadAssignmentImage(dataUrl, file.name);
+          if (!result || !result.success || !result.markdown) {
+            throw new Error(result?.error || 'image-upload-failed');
+          }
+
+          const prefix = contentField.value && !contentField.value.endsWith('\n') ? '\n' : '';
+          insertTextAtCursor(contentField, `${prefix}${result.markdown}\n`);
+        }
+        setUploadStatus(`${imageFiles.length}개 이미지가 추가되었습니다.`);
+      } catch (error) {
+        setUploadStatus(error?.message || '이미지 업로드에 실패했습니다.', true);
+      } finally {
+        isUploadingTaskImage = false;
+      }
+    }
+
     function resetAssignmentForm() {
       editingAssignmentId = null;
       document.getElementById('assignmentFormTitle').textContent = '새 과제 등록';
@@ -155,6 +217,8 @@
       document.getElementById('taskTitle').value = '';
       document.getElementById('taskContent').value = '';
       document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
+      document.getElementById('taskImageInput').value = '';
+      setUploadStatus('');
 
       const user = API.getUser();
       if (user && user.is_admin) {
@@ -178,6 +242,7 @@
         document.getElementById('adminTargetClass').value = String(assignment.target_class || user.class_number || 1);
       }
 
+      setUploadStatus('');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -207,6 +272,11 @@
     }
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
+      if (isUploadingTaskImage) {
+        alert('이미지 업로드가 끝난 뒤 다시 시도해주세요.');
+        return;
+      }
+
       const title = document.getElementById('taskTitle').value.trim();
       const content = document.getElementById('taskContent').value.trim();
       const due_date = document.getElementById('taskDate').value;
@@ -231,6 +301,26 @@
       } else {
         alert(res?.error || (editingAssignmentId ? '수정에 실패했습니다.' : '등록에 실패했습니다.'));
       }
+    });
+
+    document.getElementById('insertImageBtn').addEventListener('click', () => {
+      document.getElementById('taskImageInput').click();
+    });
+
+    document.getElementById('taskImageInput').addEventListener('change', async (event) => {
+      await uploadImagesToContent(event.target.files);
+      event.target.value = '';
+    });
+
+    document.getElementById('taskContent').addEventListener('paste', async (event) => {
+      const imageFiles = Array.from(event.clipboardData?.items || [])
+        .filter(item => item.kind === 'file' && String(item.type || '').startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+
+      if (imageFiles.length === 0) return;
+      event.preventDefault();
+      await uploadImagesToContent(imageFiles);
     });
 
     document.getElementById('myAssignments').addEventListener('click', async (e) => {

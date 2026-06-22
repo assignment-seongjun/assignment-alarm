@@ -33,29 +33,78 @@ const API = {
       .replace(/'/g, '&#39;');
   },
 
+  isSafeContentUrl(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(String(value).trim(), window.location.origin);
+      return ['http:', 'https:'].includes(url.protocol);
+    } catch {
+      return false;
+    }
+  },
+
+  isSafeContentImageUrl(value) {
+    if (!this.isSafeContentUrl(value)) return false;
+    try {
+      const url = new URL(String(value).trim(), window.location.origin);
+      if (url.origin === window.location.origin) {
+        return url.pathname.startsWith('/uploads/');
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   renderTextWithLinks(value) {
     const text = String(value ?? '');
     if (!text) return '';
 
-    const urlPattern = /(https?:\/\/[^\s<]+)/g;
-    return text.split(urlPattern).map(part => {
-      if (!part) return '';
-      if (!/^https?:\/\//.test(part)) {
-        return this.escapeHTML(part);
+    const tokenPattern = /!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<]+)/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = tokenPattern.exec(text)) !== null) {
+      const [fullMatch, imageAlt, imageUrl, linkLabel, linkUrl, bareUrl] = match;
+      if (match.index > lastIndex) {
+        parts.push(this.escapeHTML(text.slice(lastIndex, match.index)));
       }
 
-      try {
-        const url = new URL(part);
-        if (!['http:', 'https:'].includes(url.protocol)) {
-          return this.escapeHTML(part);
+      if (imageUrl !== undefined) {
+        if (this.isSafeContentImageUrl(imageUrl)) {
+          const safeSrc = this.escapeHTML(new URL(String(imageUrl).trim(), window.location.origin).toString());
+          const safeAlt = this.escapeHTML(imageAlt || '첨부 이미지');
+          parts.push(`<img class="assignment-inline-image" src="${safeSrc}" alt="${safeAlt}" loading="lazy">`);
+        } else {
+          parts.push(this.escapeHTML(fullMatch));
         }
-        const safeHref = this.escapeHTML(url.toString());
-        const safeLabel = this.escapeHTML(part);
-        return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
-      } catch {
-        return this.escapeHTML(part);
+      } else if (linkUrl !== undefined) {
+        if (this.isSafeContentUrl(linkUrl)) {
+          const safeHref = this.escapeHTML(new URL(String(linkUrl).trim(), window.location.origin).toString());
+          const safeLabel = this.escapeHTML(linkLabel);
+          parts.push(`<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`);
+        } else {
+          parts.push(this.escapeHTML(fullMatch));
+        }
+      } else if (bareUrl) {
+        if (this.isSafeContentUrl(bareUrl)) {
+          const safeHref = this.escapeHTML(new URL(String(bareUrl).trim(), window.location.origin).toString());
+          const safeLabel = this.escapeHTML(bareUrl);
+          parts.push(`<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`);
+        } else {
+          parts.push(this.escapeHTML(fullMatch));
+        }
       }
-    }).join('');
+
+      lastIndex = match.index + fullMatch.length;
+    }
+
+    if (lastIndex < text.length) {
+      parts.push(this.escapeHTML(text.slice(lastIndex)));
+    }
+
+    return parts.join('');
   },
 
   isLoginPage() {
@@ -140,6 +189,7 @@ const API = {
   createAssignment(data) { return this.post('/api/assignments', data); },
   updateAssignment(id, data) { return this.put(`/api/assignments/${id}`, data); },
   deleteAssignment(id) { return this.del(`/api/assignments/${id}`); },
+  uploadAssignmentImage(dataUrl, fileName) { return this.post('/api/uploads/assignment-image', { image_data_url: dataUrl, file_name: fileName || null }); },
 
   getUserAssignments(userId) { return this.get(`/api/user-assignments/${userId}`); },
   toggleAssignment(assignmentId, completed) { return this.put('/api/user-assignments', { assignment_id: assignmentId, is_completed: completed }); },

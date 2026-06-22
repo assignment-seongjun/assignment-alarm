@@ -3,6 +3,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
+const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -32,12 +33,22 @@ const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
 const ADMIN_CLASS = Number.parseInt(process.env.ADMIN_CLASS || '1', 10);
 const MAX_GRADE = 3;
 const MAX_CLASS = 4;
+const MAX_ASSIGNMENT_CONTENT_LENGTH = 12000;
+const MAX_ASSIGNMENT_IMAGE_BYTES = 4 * 1024 * 1024;
 const AUTH_COOKIE_NAME = 'assignment_alarm_session';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
 const authAttempts = new Map();
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
+const ASSIGNMENT_IMAGE_DIR = path.join(__dirname, 'src', 'uploads', 'assignment-images');
+const ASSIGNMENT_IMAGE_PUBLIC_PATH = '/uploads/assignment-images';
+const ASSIGNMENT_IMAGE_EXTENSIONS = new Map([
+  ['image/png', '.png'],
+  ['image/jpeg', '.jpg'],
+  ['image/webp', '.webp'],
+  ['image/gif', '.gif']
+]);
 
 const dbConfig = {
   host: process.env.MYSQLHOST || process.env.DB_HOST || 'mysql',
@@ -115,7 +126,7 @@ app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   next();
 });
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 app.use(express.static(path.join(__dirname, 'src'), { maxAge: 0, etag: false, lastModified: false }));
 
@@ -218,6 +229,33 @@ function isAdminUser(user) {
 
 function isValidDateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function decodeAssignmentImageDataUrl(dataUrl) {
+  const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([a-z0-9+/=\s]+)$/i.exec(String(dataUrl || ''));
+  if (!match) {
+    throw new Error('assignment-image-invalid');
+  }
+
+  const mimeType = match[1].toLowerCase();
+  const extension = ASSIGNMENT_IMAGE_EXTENSIONS.get(mimeType);
+  if (!extension) {
+    throw new Error('assignment-image-type');
+  }
+
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length) {
+    throw new Error('assignment-image-invalid');
+  }
+  if (buffer.length > MAX_ASSIGNMENT_IMAGE_BYTES) {
+    throw new Error('assignment-image-too-large');
+  }
+
+  return { buffer, extension };
+}
+
+function getAssignmentContentErrorMessage() {
+  return `과제 내용은 ${MAX_ASSIGNMENT_CONTENT_LENGTH}자 이하로 입력해주세요.`;
 }
 
 async function verifyGoogleCredential(credential) {
@@ -657,6 +695,43 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/uploads/assignment-image', authMiddleware, async (req, res) => {
+  try {
+    const imageDataUrl = String(req.body.image_data_url || '');
+    if (!imageDataUrl) {
+      return res.status(400).json({ error: '이미지 데이터가 필요합니다.' });
+    }
+
+    const user = await getCurrentUser(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+
+    let decoded;
+    try {
+      decoded = decodeAssignmentImageDataUrl(imageDataUrl);
+    } catch (error) {
+      const message = error?.message === 'assignment-image-too-large'
+        ? '이미지는 4MB 이하만 업로드할 수 있습니다.'
+        : error?.message === 'assignment-image-type'
+          ? 'PNG, JPG, WEBP, GIF 이미지만 업로드할 수 있습니다.'
+          : '이미지 형식이 올바르지 않습니다.';
+      return res.status(400).json({ error: message });
+    }
+
+    const filename = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${decoded.extension}`;
+    await fs.writeFile(path.join(ASSIGNMENT_IMAGE_DIR, filename), decoded.buffer);
+
+    res.json({
+      success: true,
+      url: `${ASSIGNMENT_IMAGE_PUBLIC_PATH}/${filename}`,
+      markdown: `![첨부 이미지](${ASSIGNMENT_IMAGE_PUBLIC_PATH}/${filename})`
+    });
+  } catch {
+    res.status(500).json({ error: '이미지 업로드에 실패했습니다.' });
+  }
+});
+
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin FROM users WHERE user_id = ?', [req.user.id]);
@@ -828,7 +903,7 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
     const due_date = String(req.body.due_date || '');
     if (!title || !due_date) return res.status(400).json({ error: '과제명과 마감일은 필수입니다.' });
     if (title.length > 120) return res.status(400).json({ error: '과제명은 120자 이하로 입력해주세요.' });
-    if (content && content.length > 2000) return res.status(400).json({ error: '과제 내용은 2000자 이하로 입력해주세요.' });
+    if (content && content.length > MAX_ASSIGNMENT_CONTENT_LENGTH) return res.status(400).json({ error: getAssignmentContentErrorMessage() });
     if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
@@ -882,7 +957,7 @@ app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
     }
     if (content !== undefined) {
       const normalizedContent = content === null ? null : String(content).trim();
-      if (normalizedContent && normalizedContent.length > 2000) return res.status(400).json({ error: '과제 내용은 2000자 이하로 입력해주세요.' });
+      if (normalizedContent && normalizedContent.length > MAX_ASSIGNMENT_CONTENT_LENGTH) return res.status(400).json({ error: getAssignmentContentErrorMessage() });
       updates.push('content = ?');
       values.push(normalizedContent);
     }
@@ -1124,6 +1199,7 @@ async function init() {
   let retries = 30;
   while (retries > 0) {
     try {
+      await fs.mkdir(ASSIGNMENT_IMAGE_DIR, { recursive: true });
       const conn = await pool.getConnection();
       await conn.ping();
       for (const statement of bootstrapSchema) {
