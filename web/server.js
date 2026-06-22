@@ -27,6 +27,16 @@ const ADMIN_GOOGLE_EMAILS = Array.from(new Set(
     .map((value) => String(value || '').trim().toLowerCase())
     .filter(Boolean)
 ));
+const ADMIN_EXCLUDED_GOOGLE_EMAILS = Array.from(new Set(
+  String(
+    process.env.ADMIN_EXCLUDED_GOOGLE_EMAILS
+    || process.env.ADMIN_EXCLUDED_EMAILS
+    || ''
+  )
+    .split(/[,\n]/)
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+));
 const ADMIN_NAME = process.env.ADMIN_NAME ? String(process.env.ADMIN_NAME).trim() : null;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null;
 const ADMIN_GRADE = Number.parseInt(process.env.ADMIN_GRADE || '1', 10);
@@ -220,6 +230,7 @@ function isTeacherAdminEmail(email) {
 
 function isAdminEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
+  if (ADMIN_EXCLUDED_GOOGLE_EMAILS.includes(normalized)) return false;
   return ADMIN_GOOGLE_EMAILS.includes(normalized) || isTeacherAdminEmail(normalized);
 }
 
@@ -474,24 +485,38 @@ async function migrateSchema(conn) {
 }
 
 async function seedAdminAccount(conn) {
+  if (ADMIN_EXCLUDED_GOOGLE_EMAILS.length > 0) {
+    const excludedPlaceholders = ADMIN_EXCLUDED_GOOGLE_EMAILS.map(() => '?').join(', ');
+    await conn.execute(
+      `UPDATE users SET is_admin = 0 WHERE google_email IN (${excludedPlaceholders})`,
+      ADMIN_EXCLUDED_GOOGLE_EMAILS
+    );
+  }
+
   const [teacherRows] = await conn.execute(
     'SELECT user_id, google_email FROM users WHERE google_email LIKE ?',
     [`%teacher%@${GOOGLE_ALLOWED_DOMAIN}`]
   );
   for (const row of teacherRows) {
+    if (ADMIN_EXCLUDED_GOOGLE_EMAILS.includes(String(row.google_email || '').trim().toLowerCase())) {
+      continue;
+    }
     await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [row.user_id]);
     console.log(`Admin account synced by teacher email rule: ${row.google_email}`);
   }
 
   if (ADMIN_GOOGLE_EMAILS.length > 0) {
-    const placeholders = ADMIN_GOOGLE_EMAILS.map(() => '?').join(', ');
-    const [googleRows] = await conn.execute(
-      `SELECT user_id, google_email FROM users WHERE google_email IN (${placeholders})`,
-      ADMIN_GOOGLE_EMAILS
-    );
-    for (const row of googleRows) {
-      await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [row.user_id]);
-      console.log(`Admin account synced by email: ${row.google_email}`);
+    const targetAdminEmails = ADMIN_GOOGLE_EMAILS.filter(email => !ADMIN_EXCLUDED_GOOGLE_EMAILS.includes(email));
+    if (targetAdminEmails.length > 0) {
+      const placeholders = targetAdminEmails.map(() => '?').join(', ');
+      const [googleRows] = await conn.execute(
+        `SELECT user_id, google_email FROM users WHERE google_email IN (${placeholders})`,
+        targetAdminEmails
+      );
+      for (const row of googleRows) {
+        await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [row.user_id]);
+        console.log(`Admin account synced by email: ${row.google_email}`);
+      }
     }
   }
 

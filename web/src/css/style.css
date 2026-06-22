@@ -189,6 +189,8 @@ a { text-decoration: none; color: inherit; }
 .assignment-inline-image { display: block; max-width: min(100%, 360px); width: auto; height: auto; margin: 10px 0; border-radius: 12px; border: 1px solid #dfe5ee; box-shadow: 0 4px 14px rgba(0,0,0,0.08); background: #fff; }
 .assignment-item .info .meta { font-size: 0.8rem; color: #999; margin-top: 3px; }
 .assignment-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+.submit-check { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 999px; background: #eef7f1; color: #168148; font-size: 0.82rem; font-weight: 700; cursor: pointer; user-select: none; }
+.submit-check input { width: 16px; height: 16px; accent-color: #2ecc71; cursor: pointer; }
 .assignment-admin-item { align-items: flex-start; }
 .assignment-status-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid #ececf2; }
 .assignment-status-filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }

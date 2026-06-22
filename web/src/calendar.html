@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=21">
+  <link rel="stylesheet" href="css/style.css?v=22">
 </head>
 <body>
   <div class="app-shell">
@@ -44,7 +44,7 @@
     <div class="stats">
       <div class="stat-card urgent"><div class="num" id="urgentCount">0</div><div class="label" id="urgentLabel">긴급</div></div>
       <div class="stat-card normal"><div class="num" id="normalCount">0</div><div class="label" id="normalLabel">진행중</div></div>
-      <div class="stat-card done"><div class="num" id="doneCount">0</div><div class="label" id="doneLabel">완료</div></div>
+      <div class="stat-card done"><div class="num" id="doneCount">0</div><div class="label" id="doneLabel">제출함</div></div>
     </div>
 
     <div class="calendar-nav">
@@ -180,7 +180,7 @@
       const done = visibleAssignments.filter(a => a.is_completed);
       document.getElementById('urgentLabel').textContent = '긴급';
       document.getElementById('normalLabel').textContent = '진행중';
-      document.getElementById('doneLabel').textContent = '완료';
+      document.getElementById('doneLabel').textContent = '제출함';
       document.getElementById('urgentCount').textContent = urgent.length;
       document.getElementById('normalCount').textContent = normal.length;
       document.getElementById('doneCount').textContent = done.length;
@@ -188,19 +188,6 @@
 
     document.getElementById('calendarBody').addEventListener('click', async (e) => {
       const user = API.getUser();
-      const el = e.target.closest('.task-item-el');
-      if (el && !(user && user.is_admin)) {
-        const id = parseInt(el.dataset.id);
-        const task = assignments.find(a => a.assignment_id === id);
-        if (!task) return;
-        const newStatus = !task.is_completed;
-        const res = await API.toggleAssignment(id, newStatus);
-        if (!res || !res.success) return;
-        task.is_completed = newStatus ? 1 : 0;
-        renderCalendar();
-        return;
-      }
-
       const day = e.target.closest('.day');
       if (day && !day.classList.contains('empty')) {
         const date = day.dataset.date;
@@ -214,10 +201,10 @@
             <div class="info">
               <div class="title">${API.escapeHTML(a.title)}</div>
               ${a.content ? `<div class="detail">${API.renderTextWithLinks(a.content)}</div>` : ''}
-              <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${user && user.is_admin ? `${a.target_grade}학년 ${a.target_class}반` : a.is_completed ? '✅ 완료' : '⬜ 미완료'}</div>
+              <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${user && user.is_admin ? `${a.target_grade}학년 ${a.target_class}반` : a.is_completed ? '☑ 제출함' : '☐ 미제출'}</div>
             </div>
             <div class="actions">
-              ${!a.is_completed && !(user && user.is_admin) ? `<button class="btn btn-success btn-sm modal-complete" data-id="${a.assignment_id}">완료</button>` : ''}
+              ${!(user && user.is_admin) ? `<label class="submit-check"><input type="checkbox" class="modal-submit-toggle" data-id="${a.assignment_id}" ${a.is_completed ? 'checked' : ''}> <span>제출함</span></label>` : ''}
               ${user && (a.created_by === user.id || user.is_admin) ? `<button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>` : ''}
             </div>
           </div>`;
@@ -230,14 +217,6 @@
     document.getElementById('taskList').addEventListener('click', async (e) => {
       const id = parseInt(e.target.dataset.id);
       if (!id) return;
-      if (e.target.classList.contains('modal-complete')) {
-        const res = await API.toggleAssignment(id, true);
-        if (!res || !res.success) return;
-        const task = assignments.find(a => a.assignment_id === id);
-        if (task) task.is_completed = 1;
-        renderCalendar();
-        document.getElementById('modal').classList.remove('show');
-      }
       if (e.target.classList.contains('modal-delete')) {
         const res = await API.deleteAssignment(id);
         if (!res || !res.success) return;
@@ -246,6 +225,20 @@
         await API.refreshNotifications();
         document.getElementById('modal').classList.remove('show');
       }
+    });
+
+    document.getElementById('taskList').addEventListener('change', async (e) => {
+      if (!e.target.classList.contains('modal-submit-toggle')) return;
+      const id = parseInt(e.target.dataset.id, 10);
+      if (!id) return;
+      const res = await API.toggleAssignment(id, e.target.checked);
+      if (!res || !res.success) {
+        e.target.checked = !e.target.checked;
+        return;
+      }
+      const task = assignments.find(a => a.assignment_id === id);
+      if (task) task.is_completed = e.target.checked ? 1 : 0;
+      renderCalendar();
     });
 
     document.getElementById('prevMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });

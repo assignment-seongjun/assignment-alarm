@@ -276,8 +276,8 @@
         <div class="assignment-status-panel">
           <div class="assignment-status-filter">
             <button type="button" class="status-filter-btn ${filter === 'all' ? 'active' : ''}" data-id="${assignmentId}" data-filter="all">전체</button>
-            <button type="button" class="status-filter-btn ${filter === 'completed' ? 'active' : ''}" data-id="${assignmentId}" data-filter="completed">완료만</button>
-            <button type="button" class="status-filter-btn ${filter === 'pending' ? 'active' : ''}" data-id="${assignmentId}" data-filter="pending">미완료만</button>
+            <button type="button" class="status-filter-btn ${filter === 'completed' ? 'active' : ''}" data-id="${assignmentId}" data-filter="completed">제출함만</button>
+            <button type="button" class="status-filter-btn ${filter === 'pending' ? 'active' : ''}" data-id="${assignmentId}" data-filter="pending">미제출만</button>
           </div>
           <div class="assignment-status-list">
             ${filteredStudents.length === 0 ? '<div class="assignment-status-empty">조건에 맞는 학생이 없습니다.</div>' : filteredStudents.map(student => `
@@ -287,7 +287,7 @@
                   <div class="assignment-status-meta">${API.escapeHTML(student.grade)}학년 ${API.escapeHTML(student.class_number)}반</div>
                 </div>
                 <span class="assignment-status-badge ${Number(student.is_completed) === 1 ? 'done' : 'pending'}">
-                  ${Number(student.is_completed) === 1 ? '완료' : '미완료'}
+                  ${Number(student.is_completed) === 1 ? '제출함' : '미제출'}
                 </span>
               </div>
             `).join('')}
@@ -320,11 +320,11 @@
               <div class="title">${API.escapeHTML(assignment.title)}</div>
               ${assignment.content ? `<div class="detail">${API.renderTextWithLinks(assignment.content)}</div>` : ''}
               <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
-              ${completedCount === null ? '' : `<div class="admin-user-meta">완료 ${completedCount}명 · 미완료 ${pendingCount}명</div>`}
+              ${completedCount === null ? '' : `<div class="admin-user-meta">제출함 ${completedCount}명 · 미제출 ${pendingCount}명</div>`}
               ${renderAssignmentStatusPanel(assignment.assignment_id)}
             </div>
             <div class="actions">
-              <button class="btn btn-secondary btn-sm toggle-assignment-status" data-id="${assignment.assignment_id}">${isOpen ? '현황 숨기기' : '현황 보기'}</button>
+              <button class="btn btn-secondary btn-sm toggle-assignment-status" data-id="${assignment.assignment_id}">${isOpen ? '제출 현황 숨기기' : '제출 현황 보기'}</button>
               <button class="btn btn-danger btn-sm delete-admin-assignment" data-id="${assignment.assignment_id}">삭제</button>
             </div>
           </div>
@@ -383,7 +383,7 @@
         const res = await API.getAssignmentStatus(assignmentId);
         if (!res || res.error) {
           adminSettingsState.assignmentStatusById[assignmentId] = {
-            error: res?.error || '완료 현황을 불러오지 못했습니다.',
+            error: res?.error || '제출 현황을 불러오지 못했습니다.',
             students: []
           };
         } else {
