@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
-  <link rel="stylesheet" href="css/style.css?v=18">
+  <link rel="stylesheet" href="css/style.css?v=19">
 </head>
 <body>
   <div class="app-shell">
@@ -132,7 +132,8 @@
       messages: [],
       assignmentStatusById: {},
       assignmentStatusLoading: {},
-      assignmentStatusOpen: {}
+      assignmentStatusOpen: {},
+      assignmentStatusFilterById: {}
     };
 
     async function init() {
@@ -239,11 +240,16 @@
 
     function pruneAssignmentStatusCache() {
       const validIds = new Set(adminSettingsState.assignments.map(assignment => String(assignment.assignment_id)));
-      ['assignmentStatusById', 'assignmentStatusLoading', 'assignmentStatusOpen'].forEach(key => {
+      ['assignmentStatusById', 'assignmentStatusLoading', 'assignmentStatusOpen', 'assignmentStatusFilterById'].forEach(key => {
         Object.keys(adminSettingsState[key]).forEach(id => {
           if (!validIds.has(id)) delete adminSettingsState[key][id];
         });
       });
+    }
+
+    function renderAttachmentLink(url) {
+      if (!url) return '';
+      return `<div class="assignment-link-wrap"><a class="assignment-link" href="${API.escapeHTML(url)}" target="_blank" rel="noopener noreferrer">첨부 링크 열기</a></div>`;
     }
 
     function renderAssignmentStatusPanel(assignmentId) {
@@ -264,10 +270,22 @@
         return '<div class="assignment-status-panel"><div class="assignment-status-empty">대상 학생이 없습니다.</div></div>';
       }
 
+      const filter = adminSettingsState.assignmentStatusFilterById[assignmentId] || 'all';
+      const filteredStudents = statusData.students.filter(student => {
+        if (filter === 'completed') return Number(student.is_completed) === 1;
+        if (filter === 'pending') return Number(student.is_completed) !== 1;
+        return true;
+      });
+
       return `
         <div class="assignment-status-panel">
+          <div class="assignment-status-filter">
+            <button type="button" class="status-filter-btn ${filter === 'all' ? 'active' : ''}" data-id="${assignmentId}" data-filter="all">전체</button>
+            <button type="button" class="status-filter-btn ${filter === 'completed' ? 'active' : ''}" data-id="${assignmentId}" data-filter="completed">완료만</button>
+            <button type="button" class="status-filter-btn ${filter === 'pending' ? 'active' : ''}" data-id="${assignmentId}" data-filter="pending">미완료만</button>
+          </div>
           <div class="assignment-status-list">
-            ${statusData.students.map(student => `
+            ${filteredStudents.length === 0 ? '<div class="assignment-status-empty">조건에 맞는 학생이 없습니다.</div>' : filteredStudents.map(student => `
               <div class="assignment-status-item">
                 <div>
                   <div class="assignment-status-name">${API.escapeHTML(student.name)}</div>
@@ -306,6 +324,7 @@
             <div class="info">
               <div class="title">${API.escapeHTML(assignment.title)}</div>
               ${assignment.content ? `<div class="detail">${API.escapeHTML(assignment.content)}</div>` : ''}
+              ${renderAttachmentLink(assignment.attachment_url)}
               <div class="meta">${API.escapeHTML(assignment.due_date)} · ${API.escapeHTML(assignment.target_class ? assignment.target_grade + '학년 ' + assignment.target_class + '반' : assignment.target_grade + '학년 전체')} · ${API.escapeHTML(assignment.creator_name || '')}</div>
               ${completedCount === null ? '' : `<div class="admin-user-meta">완료 ${completedCount}명 · 미완료 ${pendingCount}명</div>`}
               ${renderAssignmentStatusPanel(assignment.assignment_id)}
@@ -484,6 +503,13 @@
       const toggleButton = e.target.closest('.toggle-assignment-status');
       if (toggleButton) {
         await toggleAssignmentStatusView(parseInt(toggleButton.dataset.id, 10));
+        return;
+      }
+
+      const filterButton = e.target.closest('.status-filter-btn');
+      if (filterButton) {
+        adminSettingsState.assignmentStatusFilterById[filterButton.dataset.id] = filterButton.dataset.filter;
+        renderAdminAssignments();
         return;
       }
 

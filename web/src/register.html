@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 과제 등록</title>
-  <link rel="stylesheet" href="css/style.css?v=17">
+  <link rel="stylesheet" href="css/style.css?v=19">
 </head>
 <body>
   <div class="app-shell">
@@ -36,7 +36,7 @@
 
   <div class="container">
     <div class="card">
-      <h3>새 과제 등록</h3>
+      <h3 id="assignmentFormTitle">새 과제 등록</h3>
       <form id="assignmentForm" onsubmit="return false;">
         <div class="form-group">
           <label>과제명</label>
@@ -49,6 +49,10 @@
         <div class="form-group">
           <label>마감일</label>
           <input type="date" id="taskDate" required>
+        </div>
+        <div class="form-group">
+          <label>첨부 링크</label>
+          <input type="url" id="taskAttachmentUrl" placeholder="https://...">
         </div>
         <div class="form-group">
           <label>등록 대상</label>
@@ -66,6 +70,7 @@
         </div>
         <div style="display:flex;gap:10px">
           <button class="btn btn-primary" id="saveBtn">등록하기</button>
+          <button class="btn btn-secondary" type="button" id="cancelEditBtn" style="display:none">수정 취소</button>
           <button class="btn btn-secondary" type="button" onclick="location.href='calendar.html'">취소</button>
         </div>
       </form>
@@ -84,22 +89,23 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=8"></script>
+  <script src="js/api.js?v=9"></script>
   <script>
     API.requireAuth();
     let adminGradeFilter = 'all';
     let adminClassFilter = 'all';
+    let editingAssignmentId = null;
 
     async function init() {
       const user = await API.ensureUser();
       if (!user) return;
       await API.loadUserInfo();
       await API.initNotifications();
-      document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
       document.getElementById('targetScope').value = user.is_admin ? '관리자는 원하는 학년/반을 선택해서 과제를 등록할 수 있습니다.' : `${user.grade}학년 ${user.class_number}반`;
       document.getElementById('assignmentListTitle').textContent = user.is_admin ? '전체 과제 관리' : '내가 등록한 과제';
       initAdminFilters(user);
       initTargetSelectors(user);
+      resetAssignmentForm();
       await loadMyAssignments();
     }
 
@@ -145,6 +151,47 @@
       });
     }
 
+    function renderAttachmentLink(url) {
+      if (!url) return '';
+      return `<div class="assignment-link-wrap"><a class="assignment-link" href="${API.escapeHTML(url)}" target="_blank" rel="noopener noreferrer">첨부 링크 열기</a></div>`;
+    }
+
+    function resetAssignmentForm() {
+      editingAssignmentId = null;
+      document.getElementById('assignmentFormTitle').textContent = '새 과제 등록';
+      document.getElementById('saveBtn').textContent = '등록하기';
+      document.getElementById('cancelEditBtn').style.display = 'none';
+      document.getElementById('taskTitle').value = '';
+      document.getElementById('taskContent').value = '';
+      document.getElementById('taskAttachmentUrl').value = '';
+      document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
+
+      const user = API.getUser();
+      if (user && user.is_admin) {
+        document.getElementById('adminTargetGrade').value = String(user.grade || 1);
+        document.getElementById('adminTargetClass').value = String(user.class_number || 1);
+      }
+    }
+
+    function startEditAssignment(assignment) {
+      editingAssignmentId = assignment.assignment_id;
+      document.getElementById('assignmentFormTitle').textContent = '과제 수정';
+      document.getElementById('saveBtn').textContent = '수정하기';
+      document.getElementById('cancelEditBtn').style.display = 'inline-flex';
+      document.getElementById('taskTitle').value = assignment.title || '';
+      document.getElementById('taskContent').value = assignment.content || '';
+      document.getElementById('taskAttachmentUrl').value = assignment.attachment_url || '';
+      document.getElementById('taskDate').value = assignment.due_date || '';
+
+      const user = API.getUser();
+      if (user && user.is_admin) {
+        document.getElementById('adminTargetGrade').value = String(assignment.target_grade || user.grade || 1);
+        document.getElementById('adminTargetClass').value = String(assignment.target_class || user.class_number || 1);
+      }
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
     async function loadMyAssignments() {
       const user = await API.ensureUser();
       if (!user) return;
@@ -160,9 +207,11 @@
           <div class="info">
             <div class="title">${API.escapeHTML(a.title)}</div>
             ${a.content ? `<div class="detail">${API.escapeHTML(a.content)}</div>` : ''}
+            ${renderAttachmentLink(a.attachment_url)}
             <div class="meta">${API.escapeHTML(a.due_date)} · ${API.escapeHTML(a.target_class ? a.target_grade + '학년 ' + a.target_class + '반' : a.target_grade + '학년 전체')} · ${API.escapeHTML(a.creator_name || '')}</div>
           </div>
           <div class="actions">
+            <button class="btn btn-secondary btn-sm edit-my" data-id="${a.assignment_id}">수정</button>
             <button class="btn btn-danger btn-sm delete-my" data-id="${a.assignment_id}">삭제</button>
           </div>
         </div>
@@ -173,37 +222,60 @@
       const title = document.getElementById('taskTitle').value.trim();
       const content = document.getElementById('taskContent').value.trim();
       const due_date = document.getElementById('taskDate').value;
+      const attachment_url = document.getElementById('taskAttachmentUrl').value.trim();
 
       if (!title || !due_date) { alert('과제명과 마감일을 입력해주세요.'); return; }
 
       const user = API.getUser();
-      const payload = { title, content: content || null, due_date };
+      const payload = { title, content: content || null, due_date, attachment_url: attachment_url || null };
       if (user && user.is_admin) {
         payload.target_grade = parseInt(document.getElementById('adminTargetGrade').value, 10);
         payload.target_class = parseInt(document.getElementById('adminTargetClass').value, 10);
       }
 
-      const res = await API.createAssignment(payload);
+      const res = editingAssignmentId
+        ? await API.updateAssignment(editingAssignmentId, payload)
+        : await API.createAssignment(payload);
       if (res && res.success) {
-        alert('과제가 등록되었습니다.');
-        document.getElementById('taskTitle').value = '';
-        document.getElementById('taskContent').value = '';
-        document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
+        alert(editingAssignmentId ? '과제가 수정되었습니다.' : '과제가 등록되었습니다.');
+        resetAssignmentForm();
         await loadMyAssignments();
         await API.refreshNotifications();
       } else {
-        alert(res?.error || '등록에 실패했습니다.');
+        alert(res?.error || (editingAssignmentId ? '수정에 실패했습니다.' : '등록에 실패했습니다.'));
       }
     });
 
     document.getElementById('myAssignments').addEventListener('click', async (e) => {
+      if (e.target.classList.contains('edit-my')) {
+        const assignmentId = parseInt(e.target.dataset.id, 10);
+        const user = API.getUser();
+        if (!user) return;
+        const data = await API.getAssignments();
+        const visibleAssignments = getVisibleAssignments(user, Array.isArray(data) ? data : []);
+        const targetAssignment = visibleAssignments.find(assignment => Number(assignment.assignment_id) === assignmentId);
+        if (!targetAssignment) {
+          alert('과제 정보를 찾지 못했습니다.');
+          return;
+        }
+        startEditAssignment(targetAssignment);
+        return;
+      }
+
       if (e.target.classList.contains('delete-my')) {
         if (!confirm('정말 삭제하시겠습니까?')) return;
         const res = await API.deleteAssignment(parseInt(e.target.dataset.id));
         if (!res || !res.success) { alert(res?.error || '삭제에 실패했습니다.'); return; }
+        if (editingAssignmentId === parseInt(e.target.dataset.id, 10)) {
+          resetAssignmentForm();
+        }
         await loadMyAssignments();
         await API.refreshNotifications();
       }
+    });
+
+    document.getElementById('cancelEditBtn').addEventListener('click', () => {
+      resetAssignmentForm();
     });
 
     document.getElementById('adminAssignmentGradeFilter').addEventListener('change', async (e) => {

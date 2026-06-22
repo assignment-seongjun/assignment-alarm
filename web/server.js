@@ -79,6 +79,7 @@ const bootstrapSchema = [
     assignment_id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     content TEXT,
+    attachment_url VARCHAR(1000) DEFAULT NULL,
     due_date DATE NOT NULL,
     target_grade INT NOT NULL,
     target_class INT DEFAULT NULL,
@@ -218,6 +219,27 @@ function isAdminUser(user) {
 
 function isValidDateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function normalizeAttachmentUrl(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const normalized = String(value).trim();
+  if (normalized.length > 1000) {
+    throw new Error('attachment-url-too-long');
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error('attachment-url-invalid');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('attachment-url-invalid');
+  }
+
+  return parsed.toString();
 }
 
 async function verifyGoogleCredential(credential) {
@@ -420,6 +442,18 @@ async function migrateSchema(conn) {
 
   if (adminColumns.length === 0) {
     await conn.execute('ALTER TABLE users ADD COLUMN is_admin TINYINT(1) DEFAULT 0 AFTER is_alarm_enabled');
+  }
+
+  const [assignmentAttachmentColumns] = await conn.execute(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'assignments'
+       AND COLUMN_NAME = 'attachment_url'`
+  );
+
+  if (assignmentAttachmentColumns.length === 0) {
+    await conn.execute('ALTER TABLE assignments ADD COLUMN attachment_url VARCHAR(1000) DEFAULT NULL AFTER content');
   }
 }
 
@@ -813,11 +847,20 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
   try {
     const title = String(req.body.title || '').trim();
     const content = req.body.content === undefined || req.body.content === null ? null : String(req.body.content).trim();
+    let attachmentUrl = null;
     const due_date = String(req.body.due_date || '');
     if (!title || !due_date) return res.status(400).json({ error: '과제명과 마감일은 필수입니다.' });
     if (title.length > 120) return res.status(400).json({ error: '과제명은 120자 이하로 입력해주세요.' });
     if (content && content.length > 2000) return res.status(400).json({ error: '과제 내용은 2000자 이하로 입력해주세요.' });
     if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });
+    try {
+      attachmentUrl = normalizeAttachmentUrl(req.body.attachment_url);
+    } catch (error) {
+      const message = error?.message === 'attachment-url-too-long'
+        ? '첨부 링크는 1000자 이하로 입력해주세요.'
+        : '첨부 링크 형식이 올바르지 않습니다.';
+      return res.status(400).json({ error: message });
+    }
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     let target_grade = user.grade;
@@ -830,7 +873,10 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
       if (!target_class || target_class < 1 || target_class > MAX_CLASS) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
     }
 
-    const [result] = await pool.execute('INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)', [title, content || null, due_date, target_grade, target_class || null, req.user.id]);
+    const [result] = await pool.execute(
+      'INSERT INTO assignments (title, content, attachment_url, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [title, content || null, attachmentUrl, due_date, target_grade, target_class || null, req.user.id]
+    );
     const assignmentId = result.insertId;
     const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND class_number = ?', [target_grade, target_class]);
     for (const s of students) {
@@ -844,12 +890,21 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
 
 app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT created_by FROM assignments WHERE assignment_id = ?', [req.params.id]);
+    const [rows] = await pool.execute(
+      'SELECT created_by, target_grade, target_class FROM assignments WHERE assignment_id = ?',
+      [req.params.id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
-    if (rows[0].created_by !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+    const user = await getCurrentUser(req.user.id);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (rows[0].created_by !== req.user.id && !isAdminUser(user)) return res.status(403).json({ error: '권한이 없습니다.' });
     const { title, content, due_date } = req.body;
+    const currentAssignment = rows[0];
     const updates = [];
     const values = [];
+    let nextTargetGrade = currentAssignment.target_grade;
+    let nextTargetClass = currentAssignment.target_class;
+
     if (title !== undefined) {
       const normalizedTitle = String(title).trim();
       if (!normalizedTitle || normalizedTitle.length > 120) return res.status(400).json({ error: '과제명은 1자 이상 120자 이하로 입력해주세요.' });
@@ -862,14 +917,60 @@ app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
       updates.push('content = ?');
       values.push(normalizedContent);
     }
+    if (req.body.attachment_url !== undefined) {
+      let attachmentUrl = null;
+      try {
+        attachmentUrl = normalizeAttachmentUrl(req.body.attachment_url);
+      } catch (error) {
+        const message = error?.message === 'attachment-url-too-long'
+          ? '첨부 링크는 1000자 이하로 입력해주세요.'
+          : '첨부 링크 형식이 올바르지 않습니다.';
+        return res.status(400).json({ error: message });
+      }
+      updates.push('attachment_url = ?');
+      values.push(attachmentUrl);
+    }
     if (due_date !== undefined) {
       if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });
       updates.push('due_date = ?');
       values.push(due_date);
     }
+    if (isAdminUser(user)) {
+      if (req.body.target_grade !== undefined) {
+        nextTargetGrade = parseInteger(req.body.target_grade);
+        if (!nextTargetGrade || nextTargetGrade < 1 || nextTargetGrade > MAX_GRADE) {
+          return res.status(400).json({ error: '대상 학년이 올바르지 않습니다.' });
+        }
+        updates.push('target_grade = ?');
+        values.push(nextTargetGrade);
+      }
+      if (req.body.target_class !== undefined) {
+        nextTargetClass = parseInteger(req.body.target_class);
+        if (!nextTargetClass || nextTargetClass < 1 || nextTargetClass > MAX_CLASS) {
+          return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
+        }
+        updates.push('target_class = ?');
+        values.push(nextTargetClass);
+      }
+    }
     if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
     values.push(req.params.id);
     await pool.execute(`UPDATE assignments SET ${updates.join(', ')} WHERE assignment_id = ?`, values);
+
+    if (nextTargetGrade !== currentAssignment.target_grade || nextTargetClass !== currentAssignment.target_class) {
+      await pool.execute('DELETE FROM user_assignments WHERE assignment_id = ?', [req.params.id]);
+      const [students] = await pool.execute(
+        'SELECT user_id FROM users WHERE grade = ? AND class_number = ?',
+        [nextTargetGrade, nextTargetClass]
+      );
+      for (const student of students) {
+        await pool.execute(
+          'INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)',
+          [student.user_id, req.params.id]
+        );
+      }
+    }
+
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });

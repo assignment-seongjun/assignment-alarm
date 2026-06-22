@@ -180,10 +180,16 @@ a { text-decoration: none; color: inherit; }
 .assignment-item .info { flex: 1; }
 .assignment-item .info .title { font-weight: 600; color: #333; }
 .assignment-item .info .detail { margin-top: 6px; font-size: 0.9rem; color: #555; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.assignment-link-wrap { margin-top: 8px; }
+.assignment-link { display: inline-flex; align-items: center; gap: 6px; color: #1f5f8b; font-size: 0.86rem; font-weight: 600; }
+.assignment-link:hover { text-decoration: underline; }
 .assignment-item .info .meta { font-size: 0.8rem; color: #999; margin-top: 3px; }
 .assignment-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
 .assignment-admin-item { align-items: flex-start; }
 .assignment-status-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid #ececf2; }
+.assignment-status-filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.status-filter-btn { border: 1px solid #d7deea; background: white; color: #4b5875; border-radius: 999px; padding: 6px 12px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.status-filter-btn.active { background: #1a1a2e; color: white; border-color: #1a1a2e; }
 .assignment-status-list { display: grid; gap: 8px; }
 .assignment-status-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: #f6f8fc; }
 .assignment-status-name { font-size: 0.92rem; font-weight: 600; color: #1a1a2e; }
