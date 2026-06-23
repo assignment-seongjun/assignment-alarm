@@ -4,7 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
-  <link rel="stylesheet" href="css/style.css?v=21">
+  <script>
+    try {
+      if (localStorage.getItem('assignment-theme') === 'dark') {
+        document.documentElement.classList.add('theme-dark');
+      }
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="css/style.css?v=23">
 </head>
 <body>
   <div class="app-shell">
@@ -47,7 +54,7 @@
             </div>
             <div class="form-group">
               <label>소속</label>
-              <input type="text" id="settingClass" disabled style="background:#f5f5f5">
+              <input type="text" id="settingClass" class="readonly-input" disabled>
             </div>
           </div>
         </div>
@@ -60,7 +67,16 @@
           <label>과제 알림</label>
           <div class="toggle on" id="alarmToggle"></div>
         </div>
-        <p style="font-size:0.8rem;color:#999;margin-top:5px">새 과제 등록 및 마감일 알림을 받습니다.</p>
+        <p class="settings-help-text">새 과제 등록 및 마감일 알림을 받습니다.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>화면 설정</h3>
+        <div class="toggle-row">
+          <label>다크모드</label>
+          <div class="toggle" id="themeToggle"></div>
+        </div>
+        <p class="settings-help-text">앱 전체를 어두운 화면으로 볼 수 있습니다.</p>
       </div>
 
       <div class="settings-section">
@@ -118,8 +134,9 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=11"></script>
+  <script src="js/api.js?v=12"></script>
   <script>
+    API.initTheme();
     API.requireAuth();
 
     const adminSettingsState = {
@@ -180,6 +197,9 @@
       const toggle = document.getElementById('alarmToggle');
       if (data.is_alarm_enabled) toggle.classList.add('on');
       else toggle.classList.remove('on');
+
+      const themeToggle = document.getElementById('themeToggle');
+      themeToggle.classList.toggle('on', API.getTheme() === 'dark');
 
       const user = API.getUser();
       if (user) {
@@ -458,6 +478,11 @@
       const newVal = !this.classList.contains('on');
       this.classList.toggle('on');
       await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
+    });
+
+    document.getElementById('themeToggle').addEventListener('click', function() {
+      const nextTheme = API.setTheme(this.classList.contains('on') ? 'light' : 'dark');
+      this.classList.toggle('on', nextTheme === 'dark');
     });
 
     document.getElementById('adminUserList').addEventListener('click', async (e) => {

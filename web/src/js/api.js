@@ -1,5 +1,6 @@
 const API = {
   currentUser: null,
+  themeStorageKey: 'assignment-theme',
   getToken() { return null; },
   setToken() {
     localStorage.removeItem('token');
@@ -22,6 +23,39 @@ const API = {
   clearUser() {
     this.currentUser = null;
     localStorage.removeItem('user');
+  },
+
+  getTheme() {
+    try {
+      return localStorage.getItem(this.themeStorageKey) === 'dark' ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  },
+
+  applyTheme(theme) {
+    const nextTheme = theme === 'dark' ? 'dark' : 'light';
+    const root = document.documentElement;
+    const body = document.body;
+    root.classList.toggle('theme-dark', nextTheme === 'dark');
+    root.dataset.theme = nextTheme;
+    if (body) {
+      body.classList.toggle('theme-dark', nextTheme === 'dark');
+      body.dataset.theme = nextTheme;
+    }
+  },
+
+  setTheme(theme) {
+    const nextTheme = theme === 'dark' ? 'dark' : 'light';
+    try {
+      localStorage.setItem(this.themeStorageKey, nextTheme);
+    } catch {}
+    this.applyTheme(nextTheme);
+    return nextTheme;
+  },
+
+  initTheme() {
+    this.applyTheme(this.getTheme());
   },
 
   escapeHTML(value) {
@@ -368,4 +402,5 @@ const API = {
     }
   }
 };
+API.initTheme();
 window.API = API;

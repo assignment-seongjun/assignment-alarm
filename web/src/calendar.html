@@ -4,7 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 날짜화면</title>
-  <link rel="stylesheet" href="css/style.css?v=22">
+  <script>
+    try {
+      if (localStorage.getItem('assignment-theme') === 'dark') {
+        document.documentElement.classList.add('theme-dark');
+      }
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="css/style.css?v=23">
 </head>
 <body>
   <div class="app-shell">
@@ -51,7 +58,7 @@
       <button id="prevMonth">&lt; 이전</button>
       <div class="calendar-title">
         <h2 id="monthTitle"></h2>
-        <div id="classScope" style="color:#666;font-size:0.95rem;margin-top:4px"></div>
+        <div id="classScope" class="scope-text"></div>
       </div>
       <button id="nextMonth">다음 &gt;</button>
     </div>
@@ -73,7 +80,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=11"></script>
+  <script src="js/api.js?v=12"></script>
   <script>
     let currentDate = new Date();
     let assignments = [];
