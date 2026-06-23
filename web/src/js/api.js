@@ -1,6 +1,9 @@
 const API = {
   currentUser: null,
   themeStorageKey: 'assignment-theme',
+  themeOptions: ['system', 'dark', 'light'],
+  themeMediaQuery: null,
+  themeMediaBound: false,
   getToken() { return null; },
   setToken() {
     localStorage.removeItem('token');
@@ -27,26 +30,43 @@ const API = {
 
   getTheme() {
     try {
-      return localStorage.getItem(this.themeStorageKey) === 'dark' ? 'dark' : 'light';
+      const savedTheme = localStorage.getItem(this.themeStorageKey);
+      return this.themeOptions.includes(savedTheme) ? savedTheme : 'system';
     } catch {
-      return 'light';
+      return 'system';
     }
   },
 
-  applyTheme(theme) {
-    const nextTheme = theme === 'dark' ? 'dark' : 'light';
+  getResolvedTheme(theme = this.getTheme()) {
+    if (theme === 'dark' || theme === 'light') return theme;
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'light';
+  },
+
+  applyTheme(theme = this.getTheme()) {
+    const nextTheme = this.themeOptions.includes(theme) ? theme : 'system';
+    const resolvedTheme = this.getResolvedTheme(nextTheme);
     const root = document.documentElement;
     const body = document.body;
-    root.classList.toggle('theme-dark', nextTheme === 'dark');
-    root.dataset.theme = nextTheme;
+    root.classList.toggle('theme-dark', resolvedTheme === 'dark');
+    root.dataset.theme = resolvedTheme;
+    root.dataset.themePreference = nextTheme;
     if (body) {
-      body.classList.toggle('theme-dark', nextTheme === 'dark');
-      body.dataset.theme = nextTheme;
+      body.classList.toggle('theme-dark', resolvedTheme === 'dark');
+      body.dataset.theme = resolvedTheme;
+      body.dataset.themePreference = nextTheme;
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('themechange', {
+        detail: { theme: nextTheme, resolvedTheme }
+      }));
     }
   },
 
   setTheme(theme) {
-    const nextTheme = theme === 'dark' ? 'dark' : 'light';
+    const nextTheme = this.themeOptions.includes(theme) ? theme : 'system';
     try {
       localStorage.setItem(this.themeStorageKey, nextTheme);
     } catch {}
@@ -55,6 +75,20 @@ const API = {
   },
 
   initTheme() {
+    if (!this.themeMediaBound && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      this.themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleThemeMediaChange = () => {
+        if (this.getTheme() === 'system') {
+          this.applyTheme('system');
+        }
+      };
+      if (typeof this.themeMediaQuery.addEventListener === 'function') {
+        this.themeMediaQuery.addEventListener('change', handleThemeMediaChange);
+      } else if (typeof this.themeMediaQuery.addListener === 'function') {
+        this.themeMediaQuery.addListener(handleThemeMediaChange);
+      }
+      this.themeMediaBound = true;
+    }
     this.applyTheme(this.getTheme());
   },
 

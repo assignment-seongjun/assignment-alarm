@@ -5,13 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
   <script>
-    try {
-      if (localStorage.getItem('assignment-theme') === 'dark') {
-        document.documentElement.classList.add('theme-dark');
-      }
-    } catch {}
+    (function() {
+      try {
+        const savedTheme = localStorage.getItem('assignment-theme');
+        const theme = ['system', 'dark', 'light'].includes(savedTheme) ? savedTheme : 'system';
+        const resolvedTheme = theme === 'system'
+          ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : theme;
+        if (resolvedTheme === 'dark') {
+          document.documentElement.classList.add('theme-dark');
+        }
+        document.documentElement.dataset.theme = resolvedTheme;
+        document.documentElement.dataset.themePreference = theme;
+      } catch {}
+    })();
   </script>
-  <link rel="stylesheet" href="css/style.css?v=23">
+  <link rel="stylesheet" href="css/style.css?v=24">
 </head>
 <body>
   <div class="app-shell">
@@ -72,11 +81,15 @@
 
       <div class="settings-section">
         <h3>화면 설정</h3>
-        <div class="toggle-row">
-          <label>다크모드</label>
-          <div class="toggle" id="themeToggle"></div>
+        <div class="theme-mode-row">
+          <label for="themeModeSelect">화면 모드</label>
+          <select id="themeModeSelect" class="theme-mode-select">
+            <option value="system">시스템</option>
+            <option value="dark">다크모드</option>
+            <option value="light">라이트모드</option>
+          </select>
         </div>
-        <p class="settings-help-text">앱 전체를 어두운 화면으로 볼 수 있습니다.</p>
+        <p class="settings-help-text" id="themeModeHelp">시스템 설정을 따라갑니다.</p>
       </div>
 
       <div class="settings-section">
@@ -134,7 +147,7 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=12"></script>
+  <script src="js/api.js?v=13"></script>
   <script>
     API.initTheme();
     API.requireAuth();
@@ -198,8 +211,9 @@
       if (data.is_alarm_enabled) toggle.classList.add('on');
       else toggle.classList.remove('on');
 
-      const themeToggle = document.getElementById('themeToggle');
-      themeToggle.classList.toggle('on', API.getTheme() === 'dark');
+      const themeModeSelect = document.getElementById('themeModeSelect');
+      themeModeSelect.value = API.getTheme();
+      updateThemeHelpText(themeModeSelect.value, API.getResolvedTheme(themeModeSelect.value));
 
       const user = API.getUser();
       if (user) {
@@ -480,9 +494,28 @@
       await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
     });
 
-    document.getElementById('themeToggle').addEventListener('click', function() {
-      const nextTheme = API.setTheme(this.classList.contains('on') ? 'light' : 'dark');
-      this.classList.toggle('on', nextTheme === 'dark');
+    function updateThemeHelpText(theme, resolvedTheme) {
+      const helpText = document.getElementById('themeModeHelp');
+      if (!helpText) return;
+      if (theme === 'system') {
+        helpText.textContent = `시스템 설정을 따라갑니다. 현재 ${resolvedTheme === 'dark' ? '다크모드' : '라이트모드'}가 적용 중입니다.`;
+        return;
+      }
+      helpText.textContent = `앱 전체에 ${theme === 'dark' ? '다크모드' : '라이트모드'}를 고정해서 적용합니다.`;
+    }
+
+    document.getElementById('themeModeSelect').addEventListener('change', function() {
+      const nextTheme = API.setTheme(this.value);
+      updateThemeHelpText(nextTheme, API.getResolvedTheme(nextTheme));
+    });
+
+    window.addEventListener('themechange', (event) => {
+      const themeModeSelect = document.getElementById('themeModeSelect');
+      if (!themeModeSelect) return;
+      const currentTheme = event.detail?.theme || API.getTheme();
+      const resolvedTheme = event.detail?.resolvedTheme || API.getResolvedTheme(currentTheme);
+      themeModeSelect.value = currentTheme;
+      updateThemeHelpText(currentTheme, resolvedTheme);
     });
 
     document.getElementById('adminUserList').addEventListener('click', async (e) => {
