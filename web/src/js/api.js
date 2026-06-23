@@ -347,6 +347,32 @@ const API = {
 
     if (!button || !panel || !list || !badge) return;
 
+    const positionPanel = () => {
+      if (!panel.classList.contains('show')) return;
+
+      if (window.innerWidth <= 640) {
+        const buttonRect = button.getBoundingClientRect();
+        const viewportPadding = 12;
+        const panelWidth = Math.min(340, window.innerWidth - viewportPadding * 2);
+        const left = Math.max(
+          viewportPadding,
+          Math.min(window.innerWidth - viewportPadding - panelWidth, buttonRect.right - panelWidth)
+        );
+
+        panel.style.position = 'fixed';
+        panel.style.top = `${buttonRect.bottom + 10}px`;
+        panel.style.left = `${left}px`;
+        panel.style.right = 'auto';
+        panel.style.width = `${panelWidth}px`;
+      } else {
+        panel.style.position = '';
+        panel.style.top = '';
+        panel.style.left = '';
+        panel.style.right = '';
+        panel.style.width = '';
+      }
+    };
+
     const render = async () => {
       const user = this.getUser();
       if (!user) return;
@@ -388,9 +414,11 @@ const API = {
       e.stopPropagation();
       const isOpen = panel.classList.toggle('show');
       if (isOpen) {
+        positionPanel();
         const user = this.getUser();
         if (user) this.setNotificationSeenAt(user.id, new Date().toISOString());
         await render();
+        positionPanel();
       }
     });
 
@@ -411,6 +439,8 @@ const API = {
         panel.classList.remove('show');
       }
     });
+
+    window.addEventListener('resize', positionPanel);
   },
 
   async refreshNotifications() {},
