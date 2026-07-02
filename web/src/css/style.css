@@ -142,6 +142,7 @@ a { text-decoration: none; color: inherit; }
 .calendar-nav button:hover { background: var(--bg-header-strong); }
 .calendar-nav h2 { font-size: 1.4rem; color: var(--text-strong); }
 .scope-text { color: var(--text-muted); font-size: 0.95rem; margin-top: 4px; }
+.calendar-loading-banner { margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--border-panel); border-radius: 12px; background: var(--bg-surface-alt); color: var(--text-subtle); font-size: 0.88rem; }
 
 .calendar { background: var(--bg-surface); border-radius: 16px; box-shadow: var(--shadow-card); overflow: hidden; }
 .calendar-header { display: grid; grid-template-columns: repeat(7, 1fr); background: var(--bg-header); }
@@ -163,6 +164,7 @@ a { text-decoration: none; color: inherit; }
 .task-tag.urgent { background: #ff6b6b; color: white; }
 .task-tag.normal { background: #4ecdc4; color: white; }
 .task-tag.done { background: #95a5a6; color: white; text-decoration: line-through; }
+.task-tag.loading { background: var(--bg-muted-strong); color: var(--text-subtle); cursor: default; }
 
 /* Forms */
 .form-group { margin-bottom: 15px; }
@@ -329,6 +331,8 @@ a { text-decoration: none; color: inherit; }
 .admin-filter-bar.show { display: flex; }
 .admin-filter-bar strong { color: var(--text-strong); font-size: 0.9rem; }
 .admin-filter-bar select { min-width: 120px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.95rem; background: var(--bg-input); color: var(--text-main); }
+.admin-pagination { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.admin-page-meta { font-size: 0.82rem; color: var(--text-subtle); }
 
 /* Auth pages */
 .auth-page { display: flex; justify-content: center; align-items: center; min-height: 100dvh; padding: 32px 20px; }

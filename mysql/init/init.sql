@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   class_number INT NOT NULL,
   profile_image_url VARCHAR(500) DEFAULT NULL,
   is_alarm_enabled TINYINT(1) DEFAULT 1,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY users_grade_class_idx (grade, class_number)
 );
 
 CREATE TABLE IF NOT EXISTS assignments (
@@ -18,7 +19,9 @@ CREATE TABLE IF NOT EXISTS assignments (
   target_class INT DEFAULT NULL,
   created_by INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE
+  FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE,
+  KEY assignments_scope_due_created_idx (target_grade, target_class, due_date, created_at),
+  KEY assignments_created_at_idx (created_at)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -29,7 +32,9 @@ CREATE TABLE IF NOT EXISTS messages (
   target_grade INT NOT NULL,
   target_class INT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE
+  FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  KEY messages_scope_type_created_idx (target_grade, type, target_class, created_at),
+  KEY messages_created_at_idx (created_at)
 );
 
 CREATE TABLE IF NOT EXISTS user_assignments (
@@ -38,5 +43,6 @@ CREATE TABLE IF NOT EXISTS user_assignments (
   is_completed TINYINT(1) DEFAULT 0,
   PRIMARY KEY (user_id, assignment_id),
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-  FOREIGN KEY (assignment_id) REFERENCES assignments(assignment_id) ON DELETE CASCADE
+  FOREIGN KEY (assignment_id) REFERENCES assignments(assignment_id) ON DELETE CASCADE,
+  KEY user_assignments_assignment_user_idx (assignment_id, user_id, is_completed)
 );

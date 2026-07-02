@@ -50,6 +50,9 @@ const MAX_GRADE = 3;
 const MAX_CLASS = 4;
 const MAX_ASSIGNMENT_CONTENT_LENGTH = 12000;
 const MAX_ASSIGNMENT_IMAGE_BYTES = 4 * 1024 * 1024;
+const STATIC_ASSET_CACHE_SECONDS = 300;
+const ADMIN_PAGE_SIZE_DEFAULT = 12;
+const ADMIN_PAGE_SIZE_MAX = 50;
 const AUTH_COOKIE_NAME = 'assignment_alarm_session';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -133,7 +136,8 @@ const bootstrapSchema = [
     profile_image_url VARCHAR(500) DEFAULT NULL,
     is_alarm_enabled TINYINT(1) DEFAULT 1,
     is_admin TINYINT(1) DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY users_grade_class_idx (grade, class_number)
   )`,
   `CREATE TABLE IF NOT EXISTS assignments (
     assignment_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -144,7 +148,9 @@ const bootstrapSchema = [
     target_class INT DEFAULT NULL,
     created_by INT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE
+    FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE,
+    KEY assignments_scope_due_created_idx (target_grade, target_class, due_date, created_at),
+    KEY assignments_created_at_idx (created_at)
   )`,
   `CREATE TABLE IF NOT EXISTS messages (
     message_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -154,7 +160,9 @@ const bootstrapSchema = [
     target_grade INT NOT NULL,
     target_class INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE
+    FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    KEY messages_scope_type_created_idx (target_grade, type, target_class, created_at),
+    KEY messages_created_at_idx (created_at)
   )`,
   `CREATE TABLE IF NOT EXISTS user_assignments (
     user_id INT NOT NULL,
@@ -162,7 +170,8 @@ const bootstrapSchema = [
     is_completed TINYINT(1) DEFAULT 0,
     PRIMARY KEY (user_id, assignment_id),
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    FOREIGN KEY (assignment_id) REFERENCES assignments(assignment_id) ON DELETE CASCADE
+    FOREIGN KEY (assignment_id) REFERENCES assignments(assignment_id) ON DELETE CASCADE,
+    KEY user_assignments_assignment_user_idx (assignment_id, user_id, is_completed)
   )`
 ];
 
@@ -187,7 +196,25 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
-app.use(express.static(path.join(__dirname, 'src'), { maxAge: 0, etag: false, lastModified: false }));
+app.use(express.static(path.join(__dirname, 'src'), {
+  etag: true,
+  lastModified: true,
+  maxAge: IS_PRODUCTION ? `${STATIC_ASSET_CACHE_SECONDS}s` : 0,
+  setHeaders(res, filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.html') {
+      res.setHeader('Cache-Control', 'no-cache');
+      return;
+    }
+    if (!IS_PRODUCTION) {
+      res.setHeader('Cache-Control', 'no-cache');
+      return;
+    }
+    if (['.js', '.css', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(ext)) {
+      res.setHeader('Cache-Control', `public, max-age=${STATIC_ASSET_CACHE_SECONDS}, must-revalidate`);
+    }
+  }
+}));
 
 function parseCookies(req) {
   const header = req.headers.cookie;
@@ -281,6 +308,20 @@ function truncateText(value, limit) {
 function parseInteger(value) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+function parsePagination(query = {}) {
+  const rawPage = parseInteger(query.page);
+  const rawPageSize = parseInteger(query.pageSize);
+  const page = rawPage && rawPage > 0 ? rawPage : 1;
+  const pageSize = rawPageSize && rawPageSize > 0
+    ? Math.min(rawPageSize, ADMIN_PAGE_SIZE_MAX)
+    : ADMIN_PAGE_SIZE_DEFAULT;
+  return {
+    page,
+    pageSize,
+    offset: (page - 1) * pageSize
+  };
 }
 
 function normalizeBooleanFlag(value) {
@@ -527,6 +568,22 @@ async function verifyTurnstileToken(token, remoteIp) {
   return response.json();
 }
 
+async function ensureIndex(conn, tableName, indexName, definitionSql) {
+  const [rows] = await conn.execute(
+    `SELECT INDEX_NAME
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND INDEX_NAME = ?
+     LIMIT 1`,
+    [tableName, indexName]
+  );
+
+  if (rows.length === 0) {
+    await conn.execute(`ALTER TABLE \`${tableName}\` ADD INDEX \`${indexName}\` ${definitionSql}`);
+  }
+}
+
 async function migrateSchema(conn) {
   const [legacyEmailColumns] = await conn.execute(
     `SELECT COLUMN_NAME
@@ -628,6 +685,13 @@ async function migrateSchema(conn) {
   if (assignmentAttachmentColumns.length > 0) {
     await conn.execute('ALTER TABLE assignments DROP COLUMN attachment_url');
   }
+
+  await ensureIndex(conn, 'users', 'users_grade_class_idx', '(grade, class_number)');
+  await ensureIndex(conn, 'assignments', 'assignments_scope_due_created_idx', '(target_grade, target_class, due_date, created_at)');
+  await ensureIndex(conn, 'assignments', 'assignments_created_at_idx', '(created_at)');
+  await ensureIndex(conn, 'messages', 'messages_scope_type_created_idx', '(target_grade, type, target_class, created_at)');
+  await ensureIndex(conn, 'messages', 'messages_created_at_idx', '(created_at)');
+  await ensureIndex(conn, 'user_assignments', 'user_assignments_assignment_user_idx', '(assignment_id, user_id, is_completed)');
 }
 
 async function seedAdminAccount(conn) {
@@ -933,10 +997,130 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
   try {
     const adminUser = await ensureAdminAccess(req, res);
     if (!adminUser) return;
+    const { page, pageSize, offset } = parsePagination(req.query);
+    const [[countRow]] = await pool.execute('SELECT COUNT(*) AS total FROM users');
     const [rows] = await pool.execute(
-      'SELECT user_id, name, grade, class_number, is_alarm_enabled, is_admin, created_at FROM users ORDER BY is_admin DESC, grade ASC, class_number ASC, name ASC'
+      'SELECT user_id, name, grade, class_number, is_alarm_enabled, is_admin, created_at FROM users ORDER BY is_admin DESC, grade ASC, class_number ASC, name ASC LIMIT ? OFFSET ?',
+      [pageSize, offset]
     );
-    res.json(rows);
+    res.json({
+      items: rows,
+      total: Number(countRow.total) || 0,
+      page,
+      pageSize
+    });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await ensureAdminAccess(req, res);
+    if (!adminUser) return;
+
+    const { page, pageSize, offset } = parsePagination(req.query);
+    const grade = req.query.grade && req.query.grade !== 'all' ? parseInteger(req.query.grade) : null;
+    const classNumber = req.query.class_number && req.query.class_number !== 'all' ? parseInteger(req.query.class_number) : null;
+
+    if (grade !== null && (grade < 1 || grade > MAX_GRADE)) {
+      return res.status(400).json({ error: '학년 값이 올바르지 않습니다.' });
+    }
+    if (classNumber !== null && (classNumber < 1 || classNumber > MAX_CLASS)) {
+      return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
+    }
+
+    const conditions = [];
+    const params = [];
+    if (grade !== null) {
+      conditions.push('a.target_grade = ?');
+      params.push(grade);
+    }
+    if (classNumber !== null) {
+      conditions.push('a.target_class = ?');
+      params.push(classNumber);
+    }
+    const whereSql = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+    const [[countRow]] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM assignments a${whereSql}`,
+      params
+    );
+    const [rows] = await pool.execute(
+      `SELECT a.*, u.name AS creator_name
+         FROM assignments a
+         JOIN users u ON a.created_by = u.user_id${whereSql}
+        ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC
+        LIMIT ? OFFSET ?`,
+      params.concat([pageSize, offset])
+    );
+
+    res.json({
+      items: rows,
+      total: Number(countRow.total) || 0,
+      page,
+      pageSize
+    });
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+app.get('/api/admin/messages', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await ensureAdminAccess(req, res);
+    if (!adminUser) return;
+
+    const { page, pageSize, offset } = parsePagination(req.query);
+    const type = req.query.type ? String(req.query.type) : null;
+    const grade = req.query.grade && req.query.grade !== 'all' ? parseInteger(req.query.grade) : null;
+    const classNumber = req.query.class_number && req.query.class_number !== 'all' ? parseInteger(req.query.class_number) : null;
+
+    if (type && !['grade', 'class'].includes(type)) {
+      return res.status(400).json({ error: '메세지 유형이 올바르지 않습니다.' });
+    }
+    if (grade !== null && (grade < 1 || grade > MAX_GRADE)) {
+      return res.status(400).json({ error: '학년 값이 올바르지 않습니다.' });
+    }
+    if (classNumber !== null && (classNumber < 1 || classNumber > MAX_CLASS)) {
+      return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
+    }
+
+    const conditions = [];
+    const params = [];
+    if (type) {
+      conditions.push('m.type = ?');
+      params.push(type);
+    }
+    if (grade !== null) {
+      conditions.push('m.target_grade = ?');
+      params.push(grade);
+    }
+    if (type === 'class' && classNumber !== null) {
+      conditions.push('m.target_class = ?');
+      params.push(classNumber);
+    }
+    const whereSql = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+    const [[countRow]] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM messages m${whereSql}`,
+      params
+    );
+    const [rows] = await pool.execute(
+      `SELECT m.*, u.name AS sender_name
+         FROM messages m
+         JOIN users u ON m.sender_id = u.user_id${whereSql}
+        ORDER BY m.created_at DESC
+        LIMIT ? OFFSET ?`,
+      params.concat([pageSize, offset])
+    );
+
+    res.json({
+      items: rows,
+      total: Number(countRow.total) || 0,
+      page,
+      pageSize
+    });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }

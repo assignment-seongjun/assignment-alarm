@@ -2,13 +2,21 @@ API.initTheme();
     API.requireAuth();
 
     const adminSettingsState = {
+      pageSize: 10,
       assignmentGrade: 'all',
       assignmentClass: 'all',
+      assignmentPage: 1,
+      assignmentTotal: 0,
       messageType: 'grade',
       messageGrade: 'all',
       messageClass: 'all',
+      messagePage: 1,
+      messageTotal: 0,
+      userPage: 1,
+      userTotal: 0,
       assignments: [],
       messages: [],
+      users: [],
       assignmentStatusById: {},
       assignmentStatusLoading: {},
       assignmentStatusOpen: {},
@@ -105,20 +113,23 @@ API.initTheme();
     }
 
     function getVisibleAdminAssignments() {
-      return adminSettingsState.assignments.filter(assignment => {
-        const gradeMatch = adminSettingsState.assignmentGrade === 'all' || String(assignment.target_grade) === adminSettingsState.assignmentGrade;
-        const classMatch = adminSettingsState.assignmentClass === 'all' || String(assignment.target_class) === adminSettingsState.assignmentClass;
-        return gradeMatch && classMatch;
-      });
+      return adminSettingsState.assignments;
     }
 
     function getVisibleAdminMessages() {
-      return adminSettingsState.messages.filter(message => {
-        const gradeMatch = adminSettingsState.messageGrade === 'all' || String(message.target_grade) === adminSettingsState.messageGrade;
-        if (!gradeMatch) return false;
-        if (adminSettingsState.messageType === 'grade') return true;
-        return adminSettingsState.messageClass === 'all' || String(message.target_class) === adminSettingsState.messageClass;
-      });
+      return adminSettingsState.messages;
+    }
+
+    function renderPagination(containerId, kind, page, total, pageSize) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize));
+      container.innerHTML = `
+        <button type="button" class="btn btn-secondary btn-sm admin-page-btn" data-kind="${kind}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>이전</button>
+        <span class="admin-page-meta">${page} / ${totalPages} 페이지 · 총 ${total}개</span>
+        <button type="button" class="btn btn-secondary btn-sm admin-page-btn" data-kind="${kind}" data-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''}>다음</button>
+      `;
     }
 
     function pruneAssignmentStatusCache() {
@@ -242,10 +253,27 @@ API.initTheme();
     }
 
     async function loadAdminAssignments() {
-      const res = await API.getAssignments();
-      adminSettingsState.assignments = Array.isArray(res) ? res : [];
+      const res = await API.getAdminAssignments({
+        page: adminSettingsState.assignmentPage,
+        pageSize: adminSettingsState.pageSize,
+        grade: adminSettingsState.assignmentGrade,
+        class_number: adminSettingsState.assignmentClass
+      });
+      if (!Array.isArray(res?.items)) {
+        document.getElementById('adminAssignmentList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '과제 목록을 불러오지 못했습니다.')}</div>`;
+        document.getElementById('adminAssignmentPager').innerHTML = '';
+        return;
+      }
+      adminSettingsState.assignments = Array.isArray(res?.items) ? res.items : [];
+      adminSettingsState.assignmentTotal = Number(res?.total) || 0;
+      adminSettingsState.assignmentPage = Number(res?.page) || 1;
+      if (adminSettingsState.assignments.length === 0 && adminSettingsState.assignmentTotal > 0 && adminSettingsState.assignmentPage > 1) {
+        adminSettingsState.assignmentPage -= 1;
+        return loadAdminAssignments();
+      }
       pruneAssignmentStatusCache();
       renderAdminAssignments();
+      renderPagination('adminAssignmentPager', 'assignment', adminSettingsState.assignmentPage, adminSettingsState.assignmentTotal, adminSettingsState.pageSize);
     }
 
     async function toggleAssignmentStatusView(assignmentId) {
@@ -279,20 +307,38 @@ API.initTheme();
     }
 
     async function loadAdminMessages() {
-      const res = await API.getMessages(null, null, adminSettingsState.messageType);
-      adminSettingsState.messages = Array.isArray(res) ? res : [];
+      const res = await API.getAdminMessages({
+        page: adminSettingsState.messagePage,
+        pageSize: adminSettingsState.pageSize,
+        type: adminSettingsState.messageType,
+        grade: adminSettingsState.messageGrade,
+        class_number: adminSettingsState.messageType === 'class' ? adminSettingsState.messageClass : null
+      });
+      if (!Array.isArray(res?.items)) {
+        document.getElementById('adminMessageList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '메세지 목록을 불러오지 못했습니다.')}</div>`;
+        document.getElementById('adminMessagePager').innerHTML = '';
+        return;
+      }
+      adminSettingsState.messages = Array.isArray(res?.items) ? res.items : [];
+      adminSettingsState.messageTotal = Number(res?.total) || 0;
+      adminSettingsState.messagePage = Number(res?.page) || 1;
+      if (adminSettingsState.messages.length === 0 && adminSettingsState.messageTotal > 0 && adminSettingsState.messagePage > 1) {
+        adminSettingsState.messagePage -= 1;
+        return loadAdminMessages();
+      }
       renderAdminMessages();
+      renderPagination('adminMessagePager', 'message', adminSettingsState.messagePage, adminSettingsState.messageTotal, adminSettingsState.pageSize);
     }
 
-    async function loadAdminUsers() {
-      const res = await API.getAdminUsers();
+    function renderAdminUsers() {
       const container = document.getElementById('adminUserList');
-      if (!Array.isArray(res)) {
-        container.innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '유저 목록을 불러오지 못했습니다.')}</div>`;
+      const users = adminSettingsState.users;
+      if (!Array.isArray(users) || users.length === 0) {
+        container.innerHTML = '<div class="empty-state">표시할 유저가 없습니다.</div>';
         return;
       }
 
-      container.innerHTML = res.map(user => `
+      container.innerHTML = users.map(user => `
         <div class="admin-user-item" data-id="${user.user_id}">
           <div class="admin-user-top">
             <strong>${API.escapeHTML(user.name)}</strong>
@@ -319,6 +365,28 @@ API.initTheme();
           </div>
         </div>
       `).join('');
+    }
+
+    async function loadAdminUsers() {
+      const res = await API.getAdminUsers({
+        page: adminSettingsState.userPage,
+        pageSize: adminSettingsState.pageSize
+      });
+      if (!Array.isArray(res?.items)) {
+        document.getElementById('adminUserList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '유저 목록을 불러오지 못했습니다.')}</div>`;
+        document.getElementById('adminUserPager').innerHTML = '';
+        return;
+      }
+
+      adminSettingsState.users = res.items;
+      adminSettingsState.userTotal = Number(res?.total) || 0;
+      adminSettingsState.userPage = Number(res?.page) || 1;
+      if (adminSettingsState.users.length === 0 && adminSettingsState.userTotal > 0 && adminSettingsState.userPage > 1) {
+        adminSettingsState.userPage -= 1;
+        return loadAdminUsers();
+      }
+      renderAdminUsers();
+      renderPagination('adminUserPager', 'user', adminSettingsState.userPage, adminSettingsState.userTotal, adminSettingsState.pageSize);
     }
 
     document.getElementById('saveProfileBtn').addEventListener('click', async () => {
@@ -446,30 +514,66 @@ API.initTheme();
       });
     });
 
-    document.getElementById('adminSettingsAssignmentGrade').addEventListener('change', (e) => {
+    document.getElementById('adminSettingsAssignmentGrade').addEventListener('change', async (e) => {
       adminSettingsState.assignmentGrade = e.target.value;
-      renderAdminAssignments();
+      adminSettingsState.assignmentPage = 1;
+      if (adminSettingsState.assignmentGrade === 'all') {
+        adminSettingsState.assignmentClass = 'all';
+        document.getElementById('adminSettingsAssignmentClass').value = 'all';
+      }
+      await loadAdminAssignments();
     });
 
-    document.getElementById('adminSettingsAssignmentClass').addEventListener('change', (e) => {
+    document.getElementById('adminSettingsAssignmentClass').addEventListener('change', async (e) => {
       adminSettingsState.assignmentClass = e.target.value;
-      renderAdminAssignments();
+      adminSettingsState.assignmentPage = 1;
+      await loadAdminAssignments();
     });
 
     document.getElementById('adminSettingsMessageType').addEventListener('change', async (e) => {
       adminSettingsState.messageType = e.target.value;
+      adminSettingsState.messagePage = 1;
+      if (adminSettingsState.messageType !== 'class') {
+        adminSettingsState.messageClass = 'all';
+        document.getElementById('adminSettingsMessageClass').value = 'all';
+      }
       syncAdminMessageSelectors();
       await loadAdminMessages();
     });
 
-    document.getElementById('adminSettingsMessageGrade').addEventListener('change', (e) => {
+    document.getElementById('adminSettingsMessageGrade').addEventListener('change', async (e) => {
       adminSettingsState.messageGrade = e.target.value;
-      renderAdminMessages();
+      adminSettingsState.messagePage = 1;
+      await loadAdminMessages();
     });
 
-    document.getElementById('adminSettingsMessageClass').addEventListener('change', (e) => {
+    document.getElementById('adminSettingsMessageClass').addEventListener('change', async (e) => {
       adminSettingsState.messageClass = e.target.value;
-      renderAdminMessages();
+      adminSettingsState.messagePage = 1;
+      await loadAdminMessages();
+    });
+
+    document.addEventListener('click', async (e) => {
+      const pageButton = e.target.closest('.admin-page-btn');
+      if (!pageButton || pageButton.disabled) return;
+
+      const nextPage = parseInt(pageButton.dataset.page, 10);
+      if (!nextPage || nextPage < 1) return;
+
+      if (pageButton.dataset.kind === 'assignment') {
+        adminSettingsState.assignmentPage = nextPage;
+        await loadAdminAssignments();
+        return;
+      }
+      if (pageButton.dataset.kind === 'message') {
+        adminSettingsState.messagePage = nextPage;
+        await loadAdminMessages();
+        return;
+      }
+      if (pageButton.dataset.kind === 'user') {
+        adminSettingsState.userPage = nextPage;
+        await loadAdminUsers();
+      }
     });
 
     init();

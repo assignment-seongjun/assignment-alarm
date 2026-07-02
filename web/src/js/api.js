@@ -263,11 +263,29 @@ const API = {
   toggleAssignment(assignmentId, completed) { return this.put('/api/user-assignments', { assignment_id: assignmentId, is_completed: completed }); },
   getUserAssignmentsWithDetails(userId) { return this.get(`/api/users/${userId}/assignments`); },
 
+  getAdminAssignments(params = {}) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.pageSize) query.set('pageSize', String(params.pageSize));
+    if (params.grade) query.set('grade', String(params.grade));
+    if (params.class_number) query.set('class_number', String(params.class_number));
+    return this.get(query.toString() ? `/api/admin/assignments?${query}` : '/api/admin/assignments');
+  },
+
   getMessages(_grade, _cls, type) {
     const params = new URLSearchParams();
     if (type) params.set('type', type);
     const query = params.toString();
     return this.get(query ? `/api/messages?${query}` : '/api/messages');
+  },
+  getAdminMessages(params = {}) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.pageSize) query.set('pageSize', String(params.pageSize));
+    if (params.type) query.set('type', String(params.type));
+    if (params.grade) query.set('grade', String(params.grade));
+    if (params.class_number) query.set('class_number', String(params.class_number));
+    return this.get(query.toString() ? `/api/admin/messages?${query}` : '/api/admin/messages');
   },
   sendMessage(data) { return this.post('/api/messages', data); },
   deleteMessage(id) { return this.del(`/api/messages/${id}`); },
@@ -275,7 +293,12 @@ const API = {
 
   getUserById(id) { return this.get(`/api/users/${id}`); },
   updateUser(id, data) { return this.put(`/api/users/${id}`, data); },
-  getAdminUsers() { return this.get('/api/admin/users'); },
+  getAdminUsers(params = {}) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.pageSize) query.set('pageSize', String(params.pageSize));
+    return this.get(query.toString() ? `/api/admin/users?${query}` : '/api/admin/users');
+  },
   updateAdminUser(id, data) { return this.put(`/api/admin/users/${id}`, data); },
   deleteAdminUser(id) { return this.del(`/api/admin/users/${id}`); },
 

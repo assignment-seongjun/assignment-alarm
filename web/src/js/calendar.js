@@ -1,21 +1,39 @@
 let currentDate = new Date();
     let assignments = [];
+    let assignmentsLoading = false;
     let adminGradeFilter = 'all';
     let adminClassFilter = 'all';
 
     API.requireAuth();
 
     async function init() {
+      const cachedUser = API.getUser();
+      if (cachedUser) {
+        API.loadUserInfo();
+        initAdminFilters(cachedUser);
+        renderCalendar(true);
+      }
+
       const user = await API.ensureUser();
       if (!user) return;
       API.loadUserInfo();
       API.initNotifications().catch(() => {});
+      initAdminFilters(user);
+      renderCalendar(true);
+      loadAssignments(user).catch(() => {
+        assignmentsLoading = false;
+        renderCalendar(false);
+      });
+    }
+
+    async function loadAssignments(user) {
+      assignmentsLoading = true;
       const data = user.is_admin
         ? await API.getAssignments()
         : await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
-      if (data) assignments = data;
-      initAdminFilters(user);
-      renderCalendar();
+      assignments = Array.isArray(data) ? data : [];
+      assignmentsLoading = false;
+      renderCalendar(false);
     }
 
     function initAdminFilters(user) {
@@ -48,11 +66,12 @@ let currentDate = new Date();
       });
     }
 
-    function renderCalendar() {
+    function renderCalendar(forceLoading = assignmentsLoading) {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth();
       const user = API.getUser();
       const visibleAssignments = getVisibleAssignments();
+      const loadingBanner = document.getElementById('calendarLoadingBanner');
 
       document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월`;
       document.getElementById('classScope').textContent = user && user.is_admin
@@ -60,6 +79,9 @@ let currentDate = new Date();
         : user && user.grade && user.class_number
           ? `${user.grade}학년 ${user.class_number}반 과제`
           : '';
+      if (loadingBanner) {
+        loadingBanner.hidden = !forceLoading;
+      }
 
       const firstDay = new Date(year, month, 1).getDay();
       const lastDate = new Date(year, month + 1, 0).getDate();
@@ -92,10 +114,16 @@ let currentDate = new Date();
       }
 
       document.getElementById('calendarBody').innerHTML = html;
-      updateStats(visibleAssignments);
+      updateStats(visibleAssignments, forceLoading);
     }
 
-    function updateStats(visibleAssignments) {
+    function updateStats(visibleAssignments, isLoading = false) {
+      if (isLoading) {
+        document.getElementById('urgentCount').textContent = '...';
+        document.getElementById('normalCount').textContent = '...';
+        document.getElementById('doneCount').textContent = '...';
+        return;
+      }
       const today = new Date();
       const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
       const urgent = visibleAssignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
