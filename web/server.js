@@ -1,5 +1,6 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
+const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
@@ -17,6 +18,14 @@ const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
+const APP_BASE_URL = String(process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || '').trim().replace(/\/+$/, '') || null;
+const SMTP_HOST = process.env.SMTP_HOST || null;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587) || 587;
+const SMTP_USER = process.env.SMTP_USER || null;
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD || null;
+const SMTP_SECURE = String(process.env.SMTP_SECURE || '').trim().toLowerCase() === 'true' || SMTP_PORT === 465;
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER || null;
+const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || '과제 알리미';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash';
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
@@ -73,6 +82,8 @@ const ASSIGNMENT_IMAGE_EXTENSIONS = new Map([
   ['image/webp', '.webp'],
   ['image/gif', '.gif']
 ]);
+const EMAIL_NOTIFICATIONS_ENABLED = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM);
+let mailTransporter = null;
 
 const dbConfig = {
   host: process.env.MYSQLHOST || process.env.DB_HOST || 'mysql',
@@ -262,6 +273,166 @@ function normalizeGoogleName(value) {
   return name;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function truncateText(value, limit) {
+  const text = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(limit - 3, 1)).trim()}...`;
+}
+
+function createMailTransporter() {
+  if (!EMAIL_NOTIFICATIONS_ENABLED) return null;
+  if (!mailTransporter) {
+    mailTransporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASSWORD
+      }
+    });
+  }
+  return mailTransporter;
+}
+
+function buildMailFrom() {
+  if (!SMTP_FROM) return null;
+  return SMTP_FROM_NAME ? `"${String(SMTP_FROM_NAME).replace(/"/g, '')}" <${SMTP_FROM}>` : SMTP_FROM;
+}
+
+function buildAppUrl(pathname) {
+  if (!APP_BASE_URL) return null;
+  const normalizedPath = String(pathname || '').startsWith('/') ? pathname : `/${pathname || ''}`;
+  return `${APP_BASE_URL}${normalizedPath}`;
+}
+
+async function getNotificationRecipients({ targetGrade, targetClass, excludeUserId }) {
+  if (!EMAIL_NOTIFICATIONS_ENABLED) return [];
+
+  const params = [targetGrade];
+  let sql = `
+    SELECT user_id, name, google_email
+    FROM users
+    WHERE is_admin = 0
+      AND is_alarm_enabled = 1
+      AND google_email IS NOT NULL
+      AND google_email <> ''
+      AND grade = ?
+  `;
+
+  if (targetClass) {
+    sql += ' AND class_number = ?';
+    params.push(targetClass);
+  }
+
+  if (excludeUserId) {
+    sql += ' AND user_id <> ?';
+    params.push(excludeUserId);
+  }
+
+  sql += ' ORDER BY class_number ASC, name ASC';
+  const [rows] = await pool.execute(sql, params);
+  return rows.filter((row) => row.google_email);
+}
+
+async function sendEmails(recipients, buildMessage) {
+  if (!EMAIL_NOTIFICATIONS_ENABLED || recipients.length === 0) return;
+
+  const transporter = createMailTransporter();
+  const from = buildMailFrom();
+  if (!transporter || !from) return;
+
+  const results = await Promise.allSettled(
+    recipients.map((recipient) => {
+      const message = buildMessage(recipient);
+      return transporter.sendMail({
+        from,
+        to: recipient.google_email,
+        subject: message.subject,
+        text: message.text,
+        html: message.html
+      });
+    })
+  );
+
+  const failedCount = results.filter((result) => result.status === 'rejected').length;
+  if (failedCount > 0) {
+    console.warn(`Email notifications failed for ${failedCount} recipient(s).`);
+    results.forEach((result) => {
+      if (result.status === 'rejected') {
+        console.warn(result.reason);
+      }
+    });
+  }
+}
+
+async function sendAssignmentCreatedEmails({ creatorName, title, dueDate, targetGrade, targetClass, excludeUserId }) {
+  const recipients = await getNotificationRecipients({ targetGrade, targetClass, excludeUserId });
+  if (recipients.length === 0) return;
+
+  const scopeLabel = `${targetGrade}학년 ${targetClass}반`;
+  const safeCreatorName = escapeHtml(creatorName);
+  const safeTitle = escapeHtml(title);
+  const safeDueDate = escapeHtml(dueDate);
+  const preview = truncateText(title, 60);
+  const assignmentUrl = buildAppUrl('/calendar.html');
+  const assignmentLinkHtml = assignmentUrl
+    ? `<p style="margin: 16px 0 0;"><a href="${escapeHtml(assignmentUrl)}" style="color: #2563eb; text-decoration: underline;">과제 알리미에서 바로 보기</a></p>`
+    : '<p style="margin: 16px 0 0; color: #6b7280;">과제 알리미 calendar 화면에서 확인해주세요.</p>';
+
+  await sendEmails(recipients, () => ({
+    subject: `[과제 알리미] ${scopeLabel} 새 과제 등록`,
+    text: `${creatorName}님이 ${scopeLabel} 과제를 등록했습니다.\n\n과제명: ${title}\n마감일: ${dueDate}${assignmentUrl ? `\n확인: ${assignmentUrl}` : '\n확인: 과제 알리미 calendar 화면'}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <h2 style="margin-bottom: 12px;">새 과제가 등록되었습니다.</h2>
+        <p style="margin: 0 0 10px;">${safeCreatorName}님이 ${scopeLabel} 과제를 등록했습니다.</p>
+        <p style="margin: 0 0 6px;"><strong>과제명</strong>: ${safeTitle}</p>
+        <p style="margin: 0 0 6px;"><strong>마감일</strong>: ${safeDueDate}</p>
+        <p style="margin: 16px 0 0; color: #6b7280;">과제 알리미에서 확인해주세요. (${preview})</p>
+        ${assignmentLinkHtml}
+      </div>
+    `
+  }));
+}
+
+async function sendMessageCreatedEmails({ senderName, content, type, targetGrade, targetClass, excludeUserId }) {
+  const recipients = await getNotificationRecipients({ targetGrade, targetClass: type === 'class' ? targetClass : null, excludeUserId });
+  if (recipients.length === 0) return;
+
+  const scopeLabel = type === 'class' ? `${targetGrade}학년 ${targetClass}반 반공지` : `${targetGrade}학년 학년공지`;
+  const safeSenderName = escapeHtml(senderName);
+  const preview = truncateText(content, 100);
+  const safePreview = escapeHtml(preview);
+  const messageUrl = buildAppUrl('/messages.html');
+  const messageLinkHtml = messageUrl
+    ? `<p style="margin: 16px 0 0;"><a href="${escapeHtml(messageUrl)}" style="color: #2563eb; text-decoration: underline;">공지 화면 바로 가기</a></p>`
+    : '<p style="margin: 16px 0 0; color: #6b7280;">과제 알리미 공지 화면에서 확인해주세요.</p>';
+
+  await sendEmails(recipients, () => ({
+    subject: `[과제 알리미] ${scopeLabel} 등록`,
+    text: `${senderName}님이 ${scopeLabel}를 등록했습니다.\n\n내용: ${preview}${messageUrl ? `\n확인: ${messageUrl}` : '\n확인: 과제 알리미 공지 화면'}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <h2 style="margin-bottom: 12px;">새 공지가 등록되었습니다.</h2>
+        <p style="margin: 0 0 10px;">${safeSenderName}님이 ${scopeLabel}를 등록했습니다.</p>
+        <p style="margin: 0 0 6px;"><strong>미리보기</strong>: ${safePreview}</p>
+        ${messageLinkHtml}
+      </div>
+    `
+  }));
+}
+
 function parseInteger(value) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) ? parsed : null;
@@ -354,8 +525,8 @@ async function buildChatbotContext(user) {
       WHERE a.target_grade = ?
         AND (a.target_class = ? OR a.target_class IS NULL)
       ORDER BY a.due_date ASC, a.created_at DESC
-      LIMIT ?`,
-    [user.user_id, user.grade, user.class_number, CHATBOT_CONTEXT_ASSIGNMENT_LIMIT]
+      LIMIT ${CHATBOT_CONTEXT_ASSIGNMENT_LIMIT}`,
+    [user.user_id, user.grade, user.class_number]
   );
 
   const assignmentLines = rows.map((assignment) => {
@@ -1082,6 +1253,18 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
     for (const s of students) {
       await pool.execute('INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)', [s.user_id, assignmentId]);
     }
+
+    void sendAssignmentCreatedEmails({
+      creatorName: user.name,
+      title,
+      dueDate: due_date,
+      targetGrade: target_grade,
+      targetClass: target_class,
+      excludeUserId: req.user.id
+    }).catch((error) => {
+      console.warn('Assignment email notification failed:', error);
+    });
+
     res.json({ assignment_id: assignmentId, success: true });
   } catch (e) {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1326,6 +1509,18 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     }
 
     const [result] = await pool.execute('INSERT INTO messages (sender_id, content, type, target_grade, target_class) VALUES (?, ?, ?, ?, ?)', [req.user.id, content, type, target_grade, target_class || null]);
+
+    void sendMessageCreatedEmails({
+      senderName: user.name,
+      content,
+      type,
+      targetGrade: target_grade,
+      targetClass: target_class,
+      excludeUserId: req.user.id
+    }).catch((error) => {
+      console.warn('Message email notification failed:', error);
+    });
+
     res.json({ message_id: result.insertId, success: true });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
