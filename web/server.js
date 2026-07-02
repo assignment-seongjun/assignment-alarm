@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const app = express();
 const PORT = Number(process.env.PORT) || 80;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const TRUST_PROXY = parseTrustProxySetting(process.env.TRUST_PROXY);
 const JWT_SECRET = process.env.JWT_SECRET || (!IS_PRODUCTION ? crypto.randomBytes(32).toString('hex') : null);
 const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
@@ -53,6 +54,7 @@ const AUTH_COOKIE_NAME = 'assignment_alarm_session';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
+const AUTH_RATE_MAX_TRACKED_CLIENTS = Math.max(Number.parseInt(process.env.AUTH_RATE_MAX_TRACKED_CLIENTS || '5000', 10) || 5000, 1000);
 const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
 const CHATBOT_MAX_HISTORY_ITEMS = 10;
 const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 12;
@@ -93,6 +95,31 @@ if (!dbConfig.user || !dbConfig.password) {
 }
 
 const pool = mysql.createPool(dbConfig);
+
+function parseTrustProxySetting(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'false' || normalized === '0') return false;
+  if (normalized === 'true') return true;
+  const numeric = Number.parseInt(normalized, 10);
+  if (Number.isInteger(numeric) && String(numeric) === normalized) return numeric;
+  return normalized;
+}
+
+function buildContentSecurityPolicy() {
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://generativelanguage.googleapis.com",
+    "font-src 'self' data: https:",
+    "form-action 'self' https://accounts.google.com",
+    "frame-ancestors 'none'",
+    "frame-src 'self' https://accounts.google.com",
+    "img-src 'self' data: blob: https:",
+    "object-src 'none'",
+    "script-src 'self' https://accounts.google.com",
+    "style-src 'self' 'unsafe-inline'"
+  ].join('; ');
+}
 
 const bootstrapSchema = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -139,13 +166,23 @@ const bootstrapSchema = [
   )`
 ];
 
-app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.set('trust proxy', TRUST_PROXY);
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Content-Security-Policy', buildContentSecurityPolicy());
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  if (IS_PRODUCTION && req.secure) {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
   next();
 });
 app.use(express.json({ limit: '8mb' }));
@@ -381,11 +418,26 @@ async function findUserByGoogleSub(googleSub) {
   return rows[0] || null;
 }
 
+function cleanupExpiredAuthAttempts(now = Date.now()) {
+  for (const [key, value] of authAttempts.entries()) {
+    if (!value || value.expiresAt <= now) {
+      authAttempts.delete(key);
+    }
+  }
+}
+
 function authRateLimit(req, res, next) {
   const key = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
+  cleanupExpiredAuthAttempts(now);
   const entry = authAttempts.get(key);
   if (!entry || entry.expiresAt <= now) {
+    if (authAttempts.size >= AUTH_RATE_MAX_TRACKED_CLIENTS) {
+      const oldestKey = authAttempts.keys().next().value;
+      if (oldestKey !== undefined) {
+        authAttempts.delete(oldestKey);
+      }
+    }
     authAttempts.set(key, { count: 1, expiresAt: now + AUTH_RATE_WINDOW_MS });
     return next();
   }
