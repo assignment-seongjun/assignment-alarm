@@ -55,6 +55,9 @@ const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
 const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
 const CHATBOT_MAX_HISTORY_ITEMS = 10;
+const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 12;
+const CHATBOT_CONTEXT_CONTENT_LENGTH = 180;
+const CHATBOT_CONTEXT_TITLE_LENGTH = 80;
 const authAttempts = new Map();
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const gemini = GEMINI_API_KEY
@@ -295,6 +298,53 @@ function normalizeChatHistory(rawHistory) {
     }))
     .filter((item) => item.content)
     .slice(-CHATBOT_MAX_HISTORY_ITEMS);
+}
+
+function summarizeChatbotContextText(value, maxLength) {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1).trim()}...`;
+}
+
+async function buildChatbotContext(user) {
+  const [rows] = await pool.execute(
+    `SELECT a.assignment_id, a.title, a.content, a.due_date, COALESCE(ua.is_completed, 0) AS is_completed
+       FROM assignments a
+       LEFT JOIN user_assignments ua
+         ON ua.assignment_id = a.assignment_id
+        AND ua.user_id = ?
+      WHERE a.target_grade = ?
+        AND (a.target_class = ? OR a.target_class IS NULL)
+      ORDER BY a.due_date ASC, a.created_at DESC
+      LIMIT ?`,
+    [user.user_id, user.grade, user.class_number, CHATBOT_CONTEXT_ASSIGNMENT_LIMIT]
+  );
+
+  const assignmentLines = rows.map((assignment) => {
+    const title = summarizeChatbotContextText(assignment.title, CHATBOT_CONTEXT_TITLE_LENGTH) || '제목 없음';
+    const contentSummary = summarizeChatbotContextText(assignment.content, CHATBOT_CONTEXT_CONTENT_LENGTH);
+    const statusLabel = normalizeBooleanFlag(assignment.is_completed) ? '완료' : '미완료';
+    const parts = [
+      `- ${title}`,
+      `마감 ${assignment.due_date || '미정'}`,
+      statusLabel
+    ];
+
+    if (contentSummary) {
+      parts.push(`내용 요약: ${contentSummary}`);
+    }
+
+    return parts.join(' / ');
+  });
+
+  return [
+    '[사용자 기본 정보]',
+    `- 소속: ${user.grade}학년 ${user.class_number}반`,
+    '',
+    '[현재 과제 요약]',
+    assignmentLines.length > 0 ? assignmentLines.join('\n') : '- 현재 확인된 과제가 없습니다.'
+  ].join('\n');
 }
 
 async function verifyGoogleCredential(credential) {
@@ -1250,6 +1300,11 @@ app.post('/api/chatbot', authMiddleware, async (req, res) => {
       return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 잠시 후 다시 시도해주세요.' });
     }
 
+    const currentUser = await getCurrentUser(req.user.id);
+    if (!currentUser) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+
     const rawMessage = String(req.body.message || '').trim();
     if (!rawMessage) return res.status(400).json({ error: '질문을 입력해주세요.' });
     if (rawMessage.length > CHATBOT_MAX_MESSAGE_LENGTH) {
@@ -1257,12 +1312,23 @@ app.post('/api/chatbot', authMiddleware, async (req, res) => {
     }
 
     const history = normalizeChatHistory(req.body.history);
+    const chatbotContext = await buildChatbotContext(currentUser);
     const response = await gemini.chat.completions.create({
       model: GEMINI_CHAT_MODEL,
       messages: [
         {
           role: 'system',
-          content: '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다. 항상 한국어로 답하고, 짧고 실용적으로 설명한다. 사용자가 직접 제공하지 않은 개인정보, 계정정보, 과제정보, 공지내용은 알 수 없다고 답한다. 학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.'
+          content: [
+            '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다.',
+            '항상 한국어로 답하고, 짧고 실용적으로 설명한다.',
+            '학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.',
+            '아래 컨텍스트에는 사용자의 학년/반과 과제 요약만 포함되어 있다.',
+            '사용자 이름, 작성자 이름, 다른 학생 정보, 공지 원문 같은 민감한 정보는 모른다고 전제한다.',
+            '과제 본문은 요약본만 전달되므로 세부 지시가 더 필요하면 사용자에게 해당 부분만 직접 보내달라고 안내한다.',
+            '제공된 과제 요약 범위를 넘는 정보는 추측하지 않는다.',
+            '',
+            chatbotContext
+          ].join('\n')
         },
         ...history,
         {
@@ -1279,8 +1345,7 @@ app.post('/api/chatbot', authMiddleware, async (req, res) => {
 
     res.json({
       success: true,
-      reply,
-      model: GEMINI_CHAT_MODEL
+      reply
     });
   } catch (error) {
     console.error('Chatbot request failed:', error);
