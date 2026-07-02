@@ -8,8 +8,8 @@ let currentDate = new Date();
     async function init() {
       const user = await API.ensureUser();
       if (!user) return;
-      await API.loadUserInfo();
-      await API.initNotifications();
+      API.loadUserInfo();
+      API.initNotifications().catch(() => {});
       const data = user.is_admin
         ? await API.getAssignments()
         : await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);

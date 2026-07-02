@@ -147,12 +147,12 @@ async function init() {
   chatbotState.user = user;
   chatbotState.history = loadStoredHistory(user.id);
 
-  await API.loadUserInfo();
+  API.loadUserInfo();
   chatbotState.config = await API.publicConfig();
   renderStatus();
   renderMessages();
   syncComposerState();
-  await API.initNotifications();
+  API.initNotifications().catch(() => {});
 
   document.getElementById('chatbotForm').addEventListener('submit', async (event) => {
     event.preventDefault();

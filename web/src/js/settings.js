@@ -18,9 +18,9 @@ API.initTheme();
     async function init() {
       const user = await API.ensureUser();
       if (!user) return;
-      await API.loadUserInfo();
-      await API.initNotifications();
-      await loadProfile();
+      API.loadUserInfo();
+      API.initNotifications().catch(() => {});
+      await loadProfile(user);
       if (user.is_admin) {
         document.getElementById('adminAssignmentSection').style.display = 'block';
         document.getElementById('adminMessageSection').style.display = 'block';
@@ -34,8 +34,8 @@ API.initTheme();
       }
     }
 
-    async function loadProfile() {
-      const data = await API.me();
+    async function loadProfile(userData = null) {
+      const data = userData || API.getUser();
       if (!data || data.error) return;
 
       document.getElementById('settingName').value = data.name;

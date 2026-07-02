@@ -7,8 +7,8 @@ API.requireAuth();
     async function init() {
       const user = await API.ensureUser();
       if (!user) return;
-      await API.loadUserInfo();
-      await API.initNotifications();
+      API.loadUserInfo();
+      API.initNotifications().catch(() => {});
       document.getElementById('targetScope').value = user.is_admin ? '관리자는 원하는 학년/반을 선택해서 과제를 등록할 수 있습니다.' : `${user.grade}학년 ${user.class_number}반`;
       document.getElementById('assignmentListTitle').textContent = user.is_admin ? '전체 과제 관리' : '내가 등록한 과제';
       initAdminFilters(user);

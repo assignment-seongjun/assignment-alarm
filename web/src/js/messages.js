@@ -6,10 +6,10 @@ let filterType = 'grade';
     async function init() {
       const user = await API.ensureUser();
       if (!user) return;
-      await API.loadUserInfo();
+      API.loadUserInfo();
       initTargetSelectors();
       syncMessageForm();
-      await API.initNotifications();
+      API.initNotifications().catch(() => {});
       await loadMessages();
     }
 

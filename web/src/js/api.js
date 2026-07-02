@@ -280,42 +280,10 @@ const API = {
   deleteAdminUser(id) { return this.del(`/api/admin/users/${id}`); },
 
   async getNotifications() {
-    const user = await this.ensureUser();
+    const user = this.getUser();
     if (!user) return [];
-
-    const [assignments, messages] = await Promise.all([
-      this.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number),
-      this.getMessages(user.grade, user.class_number)
-    ]);
-
-    const assignmentItems = Array.isArray(assignments)
-      ? assignments.map(a => ({
-          id: `assignment-${a.assignment_id}`,
-          created_at: a.created_at,
-          title: '새 과제',
-          body: a.title,
-          meta: `${a.creator_name || '선생님'} · 마감 ${a.due_date}`,
-          link: 'calendar.html',
-          kind: 'assignment'
-        }))
-      : [];
-
-    const messageItems = Array.isArray(messages)
-      ? messages.map(m => ({
-          id: `message-${m.message_id}`,
-          created_at: m.created_at,
-          title: m.type === 'grade' ? '학년 공지' : '반 공지',
-          body: m.content,
-          meta: `${m.sender_name} · ${m.type === 'grade' ? `${m.target_grade}학년` : `${m.target_grade}학년 ${m.target_class}반`}`,
-          link: 'messages.html',
-          kind: 'message'
-        }))
-      : [];
-
-    return [...assignmentItems, ...messageItems]
-      .filter(item => item.created_at)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .slice(0, 12);
+    const items = await this.get('/api/notifications');
+    return Array.isArray(items) ? items : [];
   },
 
   getNotificationSeenKey(userId) {

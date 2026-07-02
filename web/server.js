@@ -1322,6 +1322,73 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  try {
+    const limit = 12;
+
+    let assignmentSql = `
+      SELECT a.assignment_id, a.title, a.due_date, a.created_at, a.target_grade, a.target_class, u.name AS creator_name
+      FROM assignments a
+      JOIN users u ON a.created_by = u.user_id
+    `;
+    let assignmentParams = [];
+
+    let messageSql = `
+      SELECT m.message_id, m.content, m.created_at, m.type, m.target_grade, m.target_class, u.name AS sender_name
+      FROM messages m
+      JOIN users u ON m.sender_id = u.user_id
+    `;
+    let messageParams = [];
+
+    if (!req.user.is_admin) {
+      assignmentSql += ' WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL)';
+      assignmentParams = [req.user.grade, req.user.class_number];
+
+      messageSql += ' WHERE m.target_grade = ? AND ((m.type = ? AND m.target_class IS NULL) OR (m.type = ? AND m.target_class = ?))';
+      messageParams = [req.user.grade, 'grade', 'class', req.user.class_number];
+    }
+
+    assignmentSql += ' ORDER BY a.created_at DESC LIMIT ?';
+    assignmentParams.push(limit);
+
+    messageSql += ' ORDER BY m.created_at DESC LIMIT ?';
+    messageParams.push(limit);
+
+    const [[assignmentRows], [messageRows]] = await Promise.all([
+      pool.execute(assignmentSql, assignmentParams),
+      pool.execute(messageSql, messageParams)
+    ]);
+
+    const items = [
+      ...assignmentRows.map((assignment) => ({
+        id: `assignment-${assignment.assignment_id}`,
+        created_at: assignment.created_at,
+        title: '새 과제',
+        body: assignment.title,
+        meta: `${assignment.creator_name || '선생님'} · 마감 ${assignment.due_date}`,
+        link: 'calendar.html',
+        kind: 'assignment'
+      })),
+      ...messageRows.map((message) => ({
+        id: `message-${message.message_id}`,
+        created_at: message.created_at,
+        title: message.type === 'grade' ? '학년 공지' : '반 공지',
+        body: message.content,
+        meta: `${message.sender_name} · ${message.type === 'grade' ? `${message.target_grade}학년` : `${message.target_grade}학년 ${message.target_class}반`}`,
+        link: 'messages.html',
+        kind: 'message'
+      }))
+    ]
+      .filter((item) => item.created_at)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, limit);
+
+    res.json(items);
+  } catch {
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
 app.post('/api/messages', authMiddleware, async (req, res) => {
   try {
     const content = String(req.body.content || '').trim();
