@@ -36,12 +36,11 @@
 | `calendar.html` | 캘린더 기반 과제 조회, 완료 처리, 관리자 범위 필터 |
 | `register.html` | 과제 등록, 등록 과제 목록 확인, 관리자 대상 학년/반 선택 |
 | `messages.html` | 학년 공지/반 공지 조회, 관리자 공지 작성 |
-| `chatbot.html` | OpenAI 기반 AI 챗봇 |
+| `chatbot.html` | Gemini 기반 AI 챗봇 |
 | `settings.html` | 프로필 수정, 알림 설정, 관리자 과제/공지/유저 관리 |
 
 ## 챗봇 설정
 
-- `OPENAI_API_KEY`: OpenAI API 키
-- `OPENAI_CHAT_MODEL`: 사용할 모델 이름, 기본값 `gpt-5.5`
-- 챗봇은 사용자가 직접 입력한 질문을 서버를 통해 OpenAI로 전달합니다.
-
+- `GEMINI_API_KEY`: Google AI Studio에서 발급한 Gemini API 키
+- `GEMINI_CHAT_MODEL`: 사용할 모델 이름, 기본값 `gemini-3.5-flash`
+- 챗봇은 사용자가 직접 입력한 질문을 서버를 통해 Gemini API로 전달합니다.

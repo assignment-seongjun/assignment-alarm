@@ -16,8 +16,9 @@ const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || null;
-const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || 'gpt-5.5';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
+const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash';
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 const GOOGLE_ALLOWED_DOMAIN = 'bssm.hs.kr';
 const ADMIN_GOOGLE_EMAILS = Array.from(new Set(
   String(
@@ -56,7 +57,9 @@ const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
 const CHATBOT_MAX_HISTORY_ITEMS = 10;
 const authAttempts = new Map();
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
-const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+const gemini = GEMINI_API_KEY
+  ? new OpenAI({ apiKey: GEMINI_API_KEY, baseURL: GEMINI_BASE_URL })
+  : null;
 const ASSIGNMENT_IMAGE_DIR = path.join(__dirname, 'src', 'uploads', 'assignment-images');
 const ASSIGNMENT_IMAGE_PUBLIC_PATH = '/uploads/assignment-images';
 const ASSIGNMENT_IMAGE_EXTENSIONS = new Map([
@@ -577,8 +580,9 @@ app.get('/api/public-config', (_req, res) => {
   res.json({
     turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : null,
     googleClientId: GOOGLE_CLIENT_ID || null,
-    chatbotEnabled: Boolean(OPENAI_API_KEY),
-    chatbotModel: OPENAI_API_KEY ? OPENAI_CHAT_MODEL : null
+    chatbotEnabled: Boolean(GEMINI_API_KEY),
+    chatbotModel: GEMINI_API_KEY ? GEMINI_CHAT_MODEL : null,
+    chatbotProvider: GEMINI_API_KEY ? 'gemini' : null
   });
 });
 
@@ -1244,8 +1248,8 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
 
 app.post('/api/chatbot', authMiddleware, async (req, res) => {
   try {
-    if (!openai) {
-      return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 서버에 OPENAI_API_KEY를 추가해주세요.' });
+    if (!gemini) {
+      return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 서버에 GEMINI_API_KEY를 추가해주세요.' });
     }
 
     const rawMessage = String(req.body.message || '').trim();
@@ -1255,29 +1259,22 @@ app.post('/api/chatbot', authMiddleware, async (req, res) => {
     }
 
     const history = normalizeChatHistory(req.body.history);
-    const transcript = history.length > 0
-      ? history.map((item) => `${item.role === 'assistant' ? 'AI' : '사용자'}: ${item.content}`).join('\n')
-      : '없음';
-
-    const prompt = [
-      '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다.',
-      '항상 한국어로 답하고, 짧고 실용적으로 설명한다.',
-      '사용자가 직접 제공하지 않은 개인정보, 계정정보, 과제정보, 공지내용은 알 수 없다고 답한다.',
-      '학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.',
-      '',
-      '[최근 대화]',
-      transcript,
-      '',
-      '[사용자의 새 질문]',
-      rawMessage
-    ].join('\n');
-
-    const response = await openai.responses.create({
-      model: OPENAI_CHAT_MODEL,
-      input: prompt
+    const response = await gemini.chat.completions.create({
+      model: GEMINI_CHAT_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다. 항상 한국어로 답하고, 짧고 실용적으로 설명한다. 사용자가 직접 제공하지 않은 개인정보, 계정정보, 과제정보, 공지내용은 알 수 없다고 답한다. 학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.'
+        },
+        ...history,
+        {
+          role: 'user',
+          content: rawMessage
+        }
+      ]
     });
 
-    const reply = String(response.output_text || '').trim();
+    const reply = String(response.choices?.[0]?.message?.content || '').trim();
     if (!reply) {
       return res.status(502).json({ error: '챗봇 응답이 비어 있습니다. 잠시 후 다시 시도해주세요.' });
     }
@@ -1285,10 +1282,16 @@ app.post('/api/chatbot', authMiddleware, async (req, res) => {
     res.json({
       success: true,
       reply,
-      model: OPENAI_CHAT_MODEL
+      model: GEMINI_CHAT_MODEL
     });
   } catch (error) {
     console.error('Chatbot request failed:', error);
+    if (error?.status === 401 || error?.status === 403) {
+      return res.status(502).json({ error: 'Gemini API 키가 잘못되었거나 권한이 없습니다.' });
+    }
+    if (error?.status === 429) {
+      return res.status(503).json({ error: 'Gemini 무료 한도 또는 요청 제한에 도달했습니다. 잠시 후 다시 시도해주세요.' });
+    }
     res.status(500).json({ error: '챗봇 응답을 가져오지 못했습니다.' });
   }
 });
