@@ -8,6 +8,7 @@ const OpenAI = require('openai');
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 
 const app = express();
 const PORT = Number(process.env.PORT) || 80;
@@ -84,6 +85,7 @@ const ASSIGNMENT_IMAGE_EXTENSIONS = new Map([
 ]);
 const EMAIL_NOTIFICATIONS_ENABLED = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM);
 let mailTransporter = null;
+let resolvedSmtpHostPromise = null;
 
 const dbConfig = {
   host: process.env.MYSQLHOST || process.env.DB_HOST || 'mysql',
@@ -289,17 +291,47 @@ function truncateText(value, limit) {
   return `${text.slice(0, Math.max(limit - 3, 1)).trim()}...`;
 }
 
-function createMailTransporter() {
+async function resolveSmtpConnectOptions() {
+  if (!SMTP_HOST) return null;
+  if (!resolvedSmtpHostPromise) {
+    resolvedSmtpHostPromise = (async () => {
+      try {
+        const addresses = await dns.resolve4(SMTP_HOST);
+        const resolvedHost = addresses.find(Boolean);
+        if (resolvedHost) {
+          console.log(`SMTP IPv4 resolved: ${SMTP_HOST} -> ${resolvedHost}`);
+          return {
+            host: resolvedHost,
+            tls: { servername: SMTP_HOST }
+          };
+        }
+      } catch (error) {
+        console.warn(`SMTP IPv4 resolution failed for ${SMTP_HOST}; falling back to hostname.`);
+        console.warn(error);
+      }
+
+      return { host: SMTP_HOST };
+    })();
+  }
+
+  return resolvedSmtpHostPromise;
+}
+
+async function createMailTransporter() {
   if (!EMAIL_NOTIFICATIONS_ENABLED) return null;
   if (!mailTransporter) {
+    const connectOptions = await resolveSmtpConnectOptions();
+    if (!connectOptions?.host) return null;
+
     mailTransporter = nodemailer.createTransport({
-      host: SMTP_HOST,
+      host: connectOptions.host,
       port: SMTP_PORT,
       secure: SMTP_SECURE,
       auth: {
         user: SMTP_USER,
         pass: SMTP_PASSWORD
-      }
+      },
+      tls: connectOptions.tls
     });
   }
   return mailTransporter;
@@ -348,7 +380,7 @@ async function getNotificationRecipients({ targetGrade, targetClass, excludeUser
 async function sendEmails(recipients, buildMessage) {
   if (!EMAIL_NOTIFICATIONS_ENABLED || recipients.length === 0) return;
 
-  const transporter = createMailTransporter();
+  const transporter = await createMailTransporter();
   const from = buildMailFrom();
   if (!transporter || !from) return;
 
