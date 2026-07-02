@@ -31,6 +31,8 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5.5}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: ${MYSQL_USER}

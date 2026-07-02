@@ -271,6 +271,7 @@ const API = {
   },
   sendMessage(data) { return this.post('/api/messages', data); },
   deleteMessage(id) { return this.del(`/api/messages/${id}`); },
+  sendChatMessage(message, history = []) { return this.post('/api/chatbot', { message, history }); },
 
   getUserById(id) { return this.get(`/api/users/${id}`); },
   updateUser(id, data) { return this.put(`/api/users/${id}`, data); },
