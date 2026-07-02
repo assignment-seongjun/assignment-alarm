@@ -63,14 +63,12 @@ function renderStatus() {
   const status = document.getElementById('chatbotStatus');
   if (!isChatbotEnabled()) {
     status.className = 'chatbot-status disabled';
-    status.textContent = '챗봇 비활성화: 서버에 GEMINI_API_KEY를 설정하면 사용할 수 있습니다.';
+    status.textContent = '챗봇이 현재 비활성화되어 있습니다.';
     return;
   }
 
-  const provider = chatbotState.config?.chatbotProvider === 'gemini' ? 'Gemini' : 'AI';
-  const model = chatbotState.config?.chatbotModel || '기본 모델';
   status.className = 'chatbot-status enabled';
-  status.textContent = `${provider} 챗봇 활성화됨 - 현재 모델: ${model}`;
+  status.textContent = '챗봇이 활성화되어 있습니다.';
 }
 
 function renderMessages() {

@@ -580,9 +580,7 @@ app.get('/api/public-config', (_req, res) => {
   res.json({
     turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : null,
     googleClientId: GOOGLE_CLIENT_ID || null,
-    chatbotEnabled: Boolean(GEMINI_API_KEY),
-    chatbotModel: GEMINI_API_KEY ? GEMINI_CHAT_MODEL : null,
-    chatbotProvider: GEMINI_API_KEY ? 'gemini' : null
+    chatbotEnabled: Boolean(GEMINI_API_KEY)
   });
 });
 
@@ -1249,7 +1247,7 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
 app.post('/api/chatbot', authMiddleware, async (req, res) => {
   try {
     if (!gemini) {
-      return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 서버에 GEMINI_API_KEY를 추가해주세요.' });
+      return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 잠시 후 다시 시도해주세요.' });
     }
 
     const rawMessage = String(req.body.message || '').trim();
@@ -1287,10 +1285,10 @@ app.post('/api/chatbot', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Chatbot request failed:', error);
     if (error?.status === 401 || error?.status === 403) {
-      return res.status(502).json({ error: 'Gemini API 키가 잘못되었거나 권한이 없습니다.' });
+      return res.status(502).json({ error: '챗봇 설정에 문제가 있습니다. 관리자에게 문의해주세요.' });
     }
     if (error?.status === 429) {
-      return res.status(503).json({ error: 'Gemini 무료 한도 또는 요청 제한에 도달했습니다. 잠시 후 다시 시도해주세요.' });
+      return res.status(503).json({ error: '요청이 많아 잠시 응답이 어렵습니다. 잠시 후 다시 시도해주세요.' });
     }
     res.status(500).json({ error: '챗봇 응답을 가져오지 못했습니다.' });
   }
