@@ -348,6 +348,13 @@ const API = {
 
     if (!button || !panel || !list || !badge) return;
 
+    let latestRenderedNotificationAt = null;
+
+    const getTimestamp = (value) => {
+      const time = new Date(value).getTime();
+      return Number.isFinite(time) ? time : 0;
+    };
+
     const positionPanel = () => {
       if (!panel.classList.contains('show')) return;
 
@@ -380,8 +387,13 @@ const API = {
 
       list.innerHTML = '<div class="notification-empty">불러오는 중...</div>';
       const items = await this.getNotifications();
+      latestRenderedNotificationAt = items.reduce((latest, item) => {
+        return getTimestamp(item.created_at) > getTimestamp(latest) ? item.created_at : latest;
+      }, null);
+
       const seenAt = this.getNotificationSeenAt(user.id);
-      const unreadCount = items.filter(item => new Date(item.created_at) > new Date(seenAt)).length;
+      const seenTime = getTimestamp(seenAt);
+      const unreadCount = items.filter(item => getTimestamp(item.created_at) > seenTime).length;
 
       if (unreadCount > 0) {
         badge.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
@@ -408,6 +420,20 @@ const API = {
       `).join('');
     };
 
+    const markCurrentNotificationsSeen = () => {
+      const user = this.getUser();
+      if (!user || !latestRenderedNotificationAt) return;
+      this.setNotificationSeenAt(user.id, latestRenderedNotificationAt);
+      badge.textContent = '0';
+      badge.classList.remove('show');
+    };
+
+    const refreshIfVisible = async () => {
+      if (document.visibilityState !== 'visible') return;
+      await render();
+      positionPanel();
+    };
+
     this.refreshNotifications = render;
     await render();
 
@@ -416,9 +442,8 @@ const API = {
       const isOpen = panel.classList.toggle('show');
       if (isOpen) {
         positionPanel();
-        const user = this.getUser();
-        if (user) this.setNotificationSeenAt(user.id, new Date().toISOString());
         await render();
+        markCurrentNotificationsSeen();
         positionPanel();
       }
     });
@@ -426,6 +451,7 @@ const API = {
     refreshBtn?.addEventListener('click', async (e) => {
       e.stopPropagation();
       await render();
+      if (panel.classList.contains('show')) markCurrentNotificationsSeen();
     });
 
     list.addEventListener('click', (e) => {
@@ -441,6 +467,15 @@ const API = {
       }
     });
 
+    document.addEventListener('visibilitychange', () => {
+      refreshIfVisible().catch(() => {});
+    });
+    window.addEventListener('focus', () => {
+      refreshIfVisible().catch(() => {});
+    });
+    window.setInterval(() => {
+      refreshIfVisible().catch(() => {});
+    }, 30000);
     window.addEventListener('resize', positionPanel);
   },
 
