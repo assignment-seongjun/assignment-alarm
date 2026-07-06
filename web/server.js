@@ -59,7 +59,7 @@ const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
 const AUTH_RATE_MAX_TRACKED_CLIENTS = Math.max(Number.parseInt(process.env.AUTH_RATE_MAX_TRACKED_CLIENTS || '5000', 10) || 5000, 1000);
 const CHATBOT_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.CHATBOT_RATE_WINDOW_MS || '300000', 10) || 300000, 60000);
-const CHATBOT_RATE_LIMIT = Math.max(Number.parseInt(process.env.CHATBOT_RATE_LIMIT || '12', 10) || 12, 1);
+const CHATBOT_RATE_LIMIT = Math.max(Number.parseInt(process.env.CHATBOT_RATE_LIMIT || '20', 10) || 20, 1);
 const ASSIGNMENT_IMAGE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASSIGNMENT_IMAGE_RATE_WINDOW_MS || '600000', 10) || 600000, 60000);
 const ASSIGNMENT_IMAGE_RATE_LIMIT = Math.max(Number.parseInt(process.env.ASSIGNMENT_IMAGE_RATE_LIMIT || '10', 10) || 10, 1);
 const ASSIGNMENT_WRITE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASSIGNMENT_WRITE_RATE_WINDOW_MS || '600000', 10) || 600000, 60000);
@@ -1322,24 +1322,19 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
   }
 });
 
-app.put('/api/admin/users/:id', authMiddleware, async (req, res) => {
-  try {
-    const adminUser = await ensureAdminAccess(req, res);
-    if (!adminUser) return;
-    const targetUserId = parseInteger(req.params.id);
-    if (!targetUserId) return res.status(400).json({ error: '사용자 정보가 올바르지 않습니다.' });
+  app.put('/api/admin/users/:id', authMiddleware, async (req, res) => {
+    try {
+      const adminUser = await ensureAdminAccess(req, res);
+      if (!adminUser) return;
+      const targetUserId = parseInteger(req.params.id);
+      if (!targetUserId) return res.status(400).json({ error: '사용자 정보가 올바르지 않습니다.' });
 
-    const [targetRows] = await pool.execute('SELECT user_id FROM users WHERE user_id = ? LIMIT 1', [targetUserId]);
-    if (targetRows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+      const [targetRows] = await pool.execute('SELECT user_id FROM users WHERE user_id = ? LIMIT 1', [targetUserId]);
+      if (targetRows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
-    if (req.body.name !== undefined) {
-      const name = normalizeName(req.body.name);
-      if (!name) return res.status(400).json({ error: '이름을 입력해주세요.' });
-      if (name.length < 2 || name.length > 30) return res.status(400).json({ error: '이름은 2자 이상 30자 이하로 입력해주세요.' });
-      const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? AND user_id <> ? LIMIT 1', [name, targetUserId]);
-      if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
-      req.body.name = name;
-    }
+      if (req.body.name !== undefined) {
+        return res.status(400).json({ error: '이름은 변경할 수 없습니다.' });
+      }
 
     if (req.body.grade !== undefined) {
       const grade = parseInteger(req.body.grade);
@@ -1357,7 +1352,7 @@ app.put('/api/admin/users/:id', authMiddleware, async (req, res) => {
       req.body.is_alarm_enabled = normalizeBooleanFlag(req.body.is_alarm_enabled);
     }
 
-    const allowed = ['name', 'grade', 'class_number', 'is_alarm_enabled'];
+      const allowed = ['grade', 'class_number', 'is_alarm_enabled'];
     const updates = [];
     const values = [];
     for (const field of allowed) {
@@ -1395,21 +1390,16 @@ app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', authMiddleware, async (req, res) => {
-  try {
-    if (parseInteger(req.params.id) !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
-    if (req.body.name !== undefined) {
-      const name = normalizeName(req.body.name);
-      if (!name) return res.status(400).json({ error: '이름을 입력해주세요.' });
-      if (name.length < 2 || name.length > 30) return res.status(400).json({ error: '이름은 2자 이상 30자 이하로 입력해주세요.' });
-      const [exists] = await pool.execute('SELECT user_id FROM users WHERE name = ? AND user_id <> ? LIMIT 1', [name, req.params.id]);
-      if (exists.length > 0) return res.status(409).json({ error: '이미 사용 중인 이름입니다.' });
-      req.body.name = name;
-    }
-    if (req.body.is_alarm_enabled !== undefined) {
-      req.body.is_alarm_enabled = normalizeBooleanFlag(req.body.is_alarm_enabled);
-    }
-    const allowed = ['name', 'is_alarm_enabled'];
+  app.put('/api/users/:id', authMiddleware, async (req, res) => {
+    try {
+      if (parseInteger(req.params.id) !== req.user.id) return res.status(403).json({ error: '권한이 없습니다.' });
+      if (req.body.name !== undefined) {
+        return res.status(400).json({ error: '이름은 변경할 수 없습니다.' });
+      }
+      if (req.body.is_alarm_enabled !== undefined) {
+        req.body.is_alarm_enabled = normalizeBooleanFlag(req.body.is_alarm_enabled);
+      }
+      const allowed = ['is_alarm_enabled'];
     const updates = [];
     const values = [];
     for (const field of allowed) {

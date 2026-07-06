@@ -43,17 +43,17 @@
         <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
           <div class="profile-avatar" id="profileAvatar">?</div>
           <div style="flex:1">
-            <div class="form-group">
-              <label>이름</label>
-              <input type="text" id="settingName" placeholder="이름">
-            </div>
+              <div class="form-group">
+                <label>이름</label>
+                <input type="text" id="settingName" class="readonly-input" placeholder="이름" disabled>
+              </div>
             <div class="form-group">
               <label>소속</label>
               <input type="text" id="settingClass" class="readonly-input" disabled>
             </div>
           </div>
         </div>
-        <button class="btn btn-primary" id="saveProfileBtn" style="margin-top:10px">프로필 저장</button>
+          <p class="settings-help-text">이름은 구글 계정 기준으로 자동 표시되며 앱 안에서 변경할 수 없습니다.</p>
       </div>
 
       <div class="settings-section">
@@ -126,8 +126,8 @@
           <span>유저 관리</span>
           <span class="admin-accordion-arrow">▾</span>
         </button>
-        <div class="admin-accordion-panel" id="adminUserPanel">
-          <p class="admin-section-help">사용자 이름과 소속 학년/반을 수정하거나 계정을 삭제할 수 있습니다.</p>
+          <div class="admin-accordion-panel" id="adminUserPanel">
+            <p class="admin-section-help">사용자 이름은 고정되며 소속 학년/반만 수정하거나 계정을 삭제할 수 있습니다.</p>
           <div id="adminUserList"></div>
           <div class="admin-pagination" id="adminUserPager"></div>
         </div>
@@ -136,8 +136,8 @@
   </div>
   </div>
 
-  <script src="js/api.js?v=15"></script>
+    <script src="js/api.js?v=16"></script>
   <script src="js/app-shell.js?v=1"></script>
-  <script src="js/settings.js?v=2"></script>
+    <script src="js/settings.js?v=3"></script>
 </body>
 </html>

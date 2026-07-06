@@ -1,9 +1,18 @@
 const API = {
   currentUser: null,
+  currentUserRequest: null,
+  currentUserCacheTtlMs: 60 * 1000,
+  currentUserFetchedAtKey: 'assignment-user-fetched-at',
   themeStorageKey: 'assignment-theme',
   themeOptions: ['system', 'dark', 'light'],
   themeMediaQuery: null,
   themeMediaBound: false,
+  publicConfigRequest: null,
+  publicConfigCacheTtlMs: 5 * 60 * 1000,
+  publicConfigCacheKey: 'assignment-public-config-cache',
+  notificationRequest: null,
+  notificationCache: null,
+  notificationCacheTtlMs: 20 * 1000,
   getToken() { return null; },
   setToken() {
     localStorage.removeItem('token');
@@ -19,13 +28,38 @@ const API = {
     }
   },
   setUser(u) {
+    const prevUser = this.getUser();
     const user = this.normalizeUser(u);
     this.currentUser = user;
     localStorage.setItem('user', JSON.stringify(user));
+    this.setCurrentUserFetchedAt();
+    if (!prevUser || String(prevUser.id) !== String(user?.id)) {
+      this.clearNotificationCache();
+    }
   },
   clearUser() {
+    const hadUser = Boolean(this.getUser());
     this.currentUser = null;
     localStorage.removeItem('user');
+    localStorage.removeItem(this.currentUserFetchedAtKey);
+    if (hadUser) {
+      this.clearNotificationCache();
+    }
+  },
+
+  getCurrentUserFetchedAt() {
+    try {
+      const value = Number.parseInt(localStorage.getItem(this.currentUserFetchedAtKey) || '0', 10);
+      return Number.isFinite(value) ? value : 0;
+    } catch {
+      return 0;
+    }
+  },
+
+  setCurrentUserFetchedAt(value = Date.now()) {
+    try {
+      localStorage.setItem(this.currentUserFetchedAtKey, String(value));
+    } catch {}
   },
 
   getTheme() {
@@ -223,7 +257,50 @@ const API = {
   googleRegister(data) { return this.post('/api/auth/google/register', data); },
   me() { return this.get('/api/auth/me'); },
   logoutRequest() { return this.post('/api/auth/logout'); },
-  publicConfig() { return this.get('/api/public-config'); },
+
+  getCachedPublicConfig() {
+    try {
+      const cached = JSON.parse(localStorage.getItem(this.publicConfigCacheKey) || 'null');
+      if (!cached || typeof cached !== 'object') return null;
+      if (!cached.fetchedAt || Date.now() - Number(cached.fetchedAt) > this.publicConfigCacheTtlMs) return null;
+      return cached.value || null;
+    } catch {
+      return null;
+    }
+  },
+
+  setCachedPublicConfig(value) {
+    try {
+      localStorage.setItem(this.publicConfigCacheKey, JSON.stringify({
+        value,
+        fetchedAt: Date.now()
+      }));
+    } catch {}
+  },
+
+  async publicConfig(options = {}) {
+    const force = Boolean(options?.force);
+    if (!force) {
+      const cached = this.getCachedPublicConfig();
+      if (cached) return cached;
+    }
+
+    if (this.publicConfigRequest) {
+      return this.publicConfigRequest;
+    }
+
+    this.publicConfigRequest = this.get('/api/public-config')
+      .then((config) => {
+        const normalized = config && typeof config === 'object' ? config : {};
+        this.setCachedPublicConfig(normalized);
+        return normalized;
+      })
+      .finally(() => {
+        this.publicConfigRequest = null;
+      });
+
+    return this.publicConfigRequest;
+  },
 
   normalizeUser(u) {
     if (!u) return null;
@@ -238,18 +315,36 @@ const API = {
     };
   },
 
-  async ensureUser() {
-    const serverUser = await this.me();
-    const user = this.normalizeUser(serverUser);
-    if (user && user.id && user.grade && user.class_number) {
-      this.setUser(user);
-      return user;
+  async ensureUser(options = {}) {
+    const force = Boolean(options?.force);
+    const cachedUser = this.getUser();
+    const fetchedAt = this.getCurrentUserFetchedAt();
+    if (!force && cachedUser?.id && cachedUser.grade && cachedUser.class_number && Date.now() - fetchedAt < this.currentUserCacheTtlMs) {
+      return cachedUser;
     }
 
-    this.clearToken();
-    this.clearUser();
-    window.location.href = 'login.html';
-    return null;
+    if (this.currentUserRequest) {
+      return this.currentUserRequest;
+    }
+
+    this.currentUserRequest = this.me()
+      .then((serverUser) => {
+        const user = this.normalizeUser(serverUser);
+        if (user && user.id && user.grade && user.class_number) {
+          this.setUser(user);
+          return user;
+        }
+
+        this.clearToken();
+        this.clearUser();
+        window.location.href = 'login.html';
+        return null;
+      })
+      .finally(() => {
+        this.currentUserRequest = null;
+      });
+
+    return this.currentUserRequest;
   },
 
   getAssignments() { return this.get('/api/assignments'); },
@@ -302,11 +397,43 @@ const API = {
   updateAdminUser(id, data) { return this.put(`/api/admin/users/${id}`, data); },
   deleteAdminUser(id) { return this.del(`/api/admin/users/${id}`); },
 
-  async getNotifications() {
+  clearNotificationCache() {
+    this.notificationCache = null;
+    this.notificationRequest = null;
+  },
+
+  async getNotifications(options = {}) {
     const user = this.getUser();
     if (!user) return [];
-    const items = await this.get('/api/notifications');
-    return Array.isArray(items) ? items : [];
+    const force = Boolean(options?.force);
+    const userId = String(user.id);
+
+    if (!force && this.notificationCache?.userId === userId && Date.now() - this.notificationCache.fetchedAt < this.notificationCacheTtlMs) {
+      return this.notificationCache.items;
+    }
+
+    if (this.notificationRequest?.userId === userId) {
+      return this.notificationRequest.promise;
+    }
+
+    const promise = this.get('/api/notifications')
+      .then((items) => {
+        const normalized = Array.isArray(items) ? items : [];
+        this.notificationCache = {
+          userId,
+          items: normalized,
+          fetchedAt: Date.now()
+        };
+        return normalized;
+      })
+      .finally(() => {
+        if (this.notificationRequest?.userId === userId) {
+          this.notificationRequest = null;
+        }
+      });
+
+    this.notificationRequest = { userId, promise };
+    return promise;
   },
 
   getNotificationSeenKey(userId) {
@@ -338,6 +465,11 @@ const API = {
     const refreshBtn = document.getElementById('notificationRefreshBtn');
 
     if (!button || !panel || !list || !badge) return;
+    if (button.dataset.notificationsBound === '1') {
+      await this.refreshNotifications();
+      return;
+    }
+    button.dataset.notificationsBound = '1';
 
     let latestRenderedNotificationAt = null;
 
@@ -372,15 +504,22 @@ const API = {
       }
     };
 
-    const render = async () => {
-      const user = this.getUser();
-      if (!user) return;
+      const render = async ({ force = false } = {}) => {
+        const user = this.getUser();
+        if (!user) return;
 
-      list.innerHTML = '<div class="notification-empty">불러오는 중...</div>';
-      const items = await this.getNotifications();
-      latestRenderedNotificationAt = items.reduce((latest, item) => {
-        return getTimestamp(item.created_at) > getTimestamp(latest) ? item.created_at : latest;
-      }, null);
+        const hasFreshCache = !force
+          && this.notificationCache?.userId === String(user.id)
+          && Date.now() - this.notificationCache.fetchedAt < this.notificationCacheTtlMs;
+
+        if (!hasFreshCache) {
+          list.innerHTML = '<div class="notification-empty">불러오는 중...</div>';
+        }
+
+        const items = await this.getNotifications({ force });
+        latestRenderedNotificationAt = items.reduce((latest, item) => {
+          return getTimestamp(item.created_at) > getTimestamp(latest) ? item.created_at : latest;
+        }, null);
 
       const seenAt = this.getNotificationSeenAt(user.id);
       const seenTime = getTimestamp(seenAt);
@@ -419,31 +558,31 @@ const API = {
       badge.classList.remove('show');
     };
 
-    const refreshIfVisible = async () => {
-      if (document.visibilityState !== 'visible') return;
-      await render();
-      positionPanel();
-    };
+      const refreshIfVisible = async () => {
+        if (document.visibilityState !== 'visible') return;
+        await render();
+        positionPanel();
+      };
 
-    this.refreshNotifications = render;
-    await render();
+      this.refreshNotifications = async (options = {}) => render(options);
+      await render();
 
     button.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const isOpen = panel.classList.toggle('show');
-      if (isOpen) {
-        positionPanel();
-        await render();
+        const isOpen = panel.classList.toggle('show');
+        if (isOpen) {
+          positionPanel();
+          await render();
         markCurrentNotificationsSeen();
         positionPanel();
       }
     });
 
-    refreshBtn?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await render();
-      if (panel.classList.contains('show')) markCurrentNotificationsSeen();
-    });
+      refreshBtn?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await render({ force: true });
+        if (panel.classList.contains('show')) markCurrentNotificationsSeen();
+      });
 
     list.addEventListener('click', (e) => {
       const item = e.target.closest('.notification-item');
@@ -461,14 +600,14 @@ const API = {
     document.addEventListener('visibilitychange', () => {
       refreshIfVisible().catch(() => {});
     });
-    window.addEventListener('focus', () => {
-      refreshIfVisible().catch(() => {});
-    });
-    window.setInterval(() => {
-      refreshIfVisible().catch(() => {});
-    }, 30000);
-    window.addEventListener('resize', positionPanel);
-  },
+      window.addEventListener('focus', () => {
+        refreshIfVisible().catch(() => {});
+      });
+      window.setInterval(() => {
+        refreshIfVisible().catch(() => {});
+      }, 60000);
+      window.addEventListener('resize', positionPanel);
+    },
 
   async refreshNotifications() {},
   async logout() {

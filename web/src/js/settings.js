@@ -1,10 +1,10 @@
 API.initTheme();
     API.requireAuth();
 
-    const adminSettingsState = {
-      pageSize: 10,
-      assignmentGrade: 'all',
-      assignmentClass: 'all',
+      const adminSettingsState = {
+        pageSize: 10,
+        assignmentGrade: 'all',
+        assignmentClass: 'all',
       assignmentPage: 1,
       assignmentTotal: 0,
       messageType: 'grade',
@@ -16,12 +16,22 @@ API.initTheme();
       userTotal: 0,
       assignments: [],
       messages: [],
-      users: [],
-      assignmentStatusById: {},
-      assignmentStatusLoading: {},
-      assignmentStatusOpen: {},
-      assignmentStatusFilterById: {}
-    };
+        users: [],
+        assignmentStatusById: {},
+        assignmentStatusLoading: {},
+        assignmentStatusOpen: {},
+        assignmentStatusFilterById: {},
+        adminLoaded: {
+          assignment: false,
+          message: false,
+          user: false
+        },
+        adminLoading: {
+          assignment: null,
+          message: null,
+          user: null
+        }
+      };
 
     async function init() {
       const user = await API.ensureUser();
@@ -29,18 +39,32 @@ API.initTheme();
       API.loadUserInfo();
       API.initNotifications().catch(() => {});
       await loadProfile(user);
-      if (user.is_admin) {
-        document.getElementById('adminAssignmentSection').style.display = 'block';
-        document.getElementById('adminMessageSection').style.display = 'block';
-        document.getElementById('adminUserSection').style.display = 'block';
-        initAdminSelectors();
-        await Promise.all([
-          loadAdminAssignments(),
-          loadAdminMessages(),
-          loadAdminUsers()
-        ]);
+        if (user.is_admin) {
+          document.getElementById('adminAssignmentSection').style.display = 'block';
+          document.getElementById('adminMessageSection').style.display = 'block';
+          document.getElementById('adminUserSection').style.display = 'block';
+          initAdminSelectors();
+          await ensureAdminSectionLoaded('assignment');
+        }
       }
-    }
+
+      async function ensureAdminSectionLoaded(kind, { force = false } = {}) {
+        const loaderMap = {
+          assignment: loadAdminAssignments,
+          message: loadAdminMessages,
+          user: loadAdminUsers
+        };
+        const loader = loaderMap[kind];
+        if (!loader) return;
+        if (!force && adminSettingsState.adminLoaded[kind]) return;
+        if (adminSettingsState.adminLoading[kind]) return adminSettingsState.adminLoading[kind];
+
+        adminSettingsState.adminLoading[kind] = loader().finally(() => {
+          adminSettingsState.adminLoading[kind] = null;
+        });
+
+        return adminSettingsState.adminLoading[kind];
+      }
 
     async function loadProfile(userData = null) {
       const data = userData || API.getUser();
@@ -252,9 +276,9 @@ API.initTheme();
       }).join('');
     }
 
-    async function loadAdminAssignments() {
-      const res = await API.getAdminAssignments({
-        page: adminSettingsState.assignmentPage,
+      async function loadAdminAssignments() {
+        const res = await API.getAdminAssignments({
+          page: adminSettingsState.assignmentPage,
         pageSize: adminSettingsState.pageSize,
         grade: adminSettingsState.assignmentGrade,
         class_number: adminSettingsState.assignmentClass
@@ -267,14 +291,15 @@ API.initTheme();
       adminSettingsState.assignments = Array.isArray(res?.items) ? res.items : [];
       adminSettingsState.assignmentTotal = Number(res?.total) || 0;
       adminSettingsState.assignmentPage = Number(res?.page) || 1;
-      if (adminSettingsState.assignments.length === 0 && adminSettingsState.assignmentTotal > 0 && adminSettingsState.assignmentPage > 1) {
-        adminSettingsState.assignmentPage -= 1;
-        return loadAdminAssignments();
+        if (adminSettingsState.assignments.length === 0 && adminSettingsState.assignmentTotal > 0 && adminSettingsState.assignmentPage > 1) {
+          adminSettingsState.assignmentPage -= 1;
+          return loadAdminAssignments();
+        }
+        pruneAssignmentStatusCache();
+        adminSettingsState.adminLoaded.assignment = true;
+        renderAdminAssignments();
+        renderPagination('adminAssignmentPager', 'assignment', adminSettingsState.assignmentPage, adminSettingsState.assignmentTotal, adminSettingsState.pageSize);
       }
-      pruneAssignmentStatusCache();
-      renderAdminAssignments();
-      renderPagination('adminAssignmentPager', 'assignment', adminSettingsState.assignmentPage, adminSettingsState.assignmentTotal, adminSettingsState.pageSize);
-    }
 
     async function toggleAssignmentStatusView(assignmentId) {
       if (!assignmentId) return;
@@ -306,8 +331,8 @@ API.initTheme();
       renderAdminAssignments();
     }
 
-    async function loadAdminMessages() {
-      const res = await API.getAdminMessages({
+      async function loadAdminMessages() {
+        const res = await API.getAdminMessages({
         page: adminSettingsState.messagePage,
         pageSize: adminSettingsState.pageSize,
         type: adminSettingsState.messageType,
@@ -322,13 +347,14 @@ API.initTheme();
       adminSettingsState.messages = Array.isArray(res?.items) ? res.items : [];
       adminSettingsState.messageTotal = Number(res?.total) || 0;
       adminSettingsState.messagePage = Number(res?.page) || 1;
-      if (adminSettingsState.messages.length === 0 && adminSettingsState.messageTotal > 0 && adminSettingsState.messagePage > 1) {
-        adminSettingsState.messagePage -= 1;
-        return loadAdminMessages();
+        if (adminSettingsState.messages.length === 0 && adminSettingsState.messageTotal > 0 && adminSettingsState.messagePage > 1) {
+          adminSettingsState.messagePage -= 1;
+          return loadAdminMessages();
+        }
+        adminSettingsState.adminLoaded.message = true;
+        renderAdminMessages();
+        renderPagination('adminMessagePager', 'message', adminSettingsState.messagePage, adminSettingsState.messageTotal, adminSettingsState.pageSize);
       }
-      renderAdminMessages();
-      renderPagination('adminMessagePager', 'message', adminSettingsState.messagePage, adminSettingsState.messageTotal, adminSettingsState.pageSize);
-    }
 
     function renderAdminUsers() {
       const container = document.getElementById('adminUserList');
@@ -345,10 +371,10 @@ API.initTheme();
             <span class="admin-role-badge ${user.is_admin ? 'admin' : 'student'}">${user.is_admin ? '관리자' : '일반'}</span>
           </div>
           <div class="admin-user-grid">
-            <div class="form-group">
-              <label>이름</label>
-              <input type="text" class="admin-name-input" value="${API.escapeHTML(user.name)}">
-            </div>
+              <div class="form-group">
+                <label>이름</label>
+                <input type="text" class="admin-name-input" value="${API.escapeHTML(user.name)}" disabled>
+              </div>
             <div class="form-group">
               <label>학년</label>
               <select class="admin-grade-select">${adminUserOptions(3, '학년', user.grade)}</select>
@@ -367,8 +393,8 @@ API.initTheme();
       `).join('');
     }
 
-    async function loadAdminUsers() {
-      const res = await API.getAdminUsers({
+      async function loadAdminUsers() {
+        const res = await API.getAdminUsers({
         page: adminSettingsState.userPage,
         pageSize: adminSettingsState.pageSize
       });
@@ -381,34 +407,19 @@ API.initTheme();
       adminSettingsState.users = res.items;
       adminSettingsState.userTotal = Number(res?.total) || 0;
       adminSettingsState.userPage = Number(res?.page) || 1;
-      if (adminSettingsState.users.length === 0 && adminSettingsState.userTotal > 0 && adminSettingsState.userPage > 1) {
-        adminSettingsState.userPage -= 1;
-        return loadAdminUsers();
+        if (adminSettingsState.users.length === 0 && adminSettingsState.userTotal > 0 && adminSettingsState.userPage > 1) {
+          adminSettingsState.userPage -= 1;
+          return loadAdminUsers();
+        }
+        adminSettingsState.adminLoaded.user = true;
+        renderAdminUsers();
+        renderPagination('adminUserPager', 'user', adminSettingsState.userPage, adminSettingsState.userTotal, adminSettingsState.pageSize);
       }
-      renderAdminUsers();
-      renderPagination('adminUserPager', 'user', adminSettingsState.userPage, adminSettingsState.userTotal, adminSettingsState.pageSize);
-    }
 
-    document.getElementById('saveProfileBtn').addEventListener('click', async () => {
-      const name = document.getElementById('settingName').value.trim();
-      if (!name) { alert('이름을 입력해주세요.'); return; }
-      const res = await API.updateUser(API.getUser().id, { name });
-      if (res && res.success) {
-        const user = API.getUser();
-        user.name = name;
-        API.setUser(user);
-        await API.loadUserInfo();
-        document.getElementById('profileAvatar').textContent = name.charAt(0);
-        alert('프로필이 저장되었습니다.');
-      } else {
-        alert(res?.error || '저장에 실패했습니다.');
-      }
-    });
-
-    document.getElementById('alarmToggle').addEventListener('click', async function() {
-      const newVal = !this.classList.contains('on');
-      this.classList.toggle('on');
-      await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
+      document.getElementById('alarmToggle').addEventListener('click', async function() {
+        const newVal = !this.classList.contains('on');
+        this.classList.toggle('on');
+        await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
     });
 
     function updateThemeHelpText(theme, resolvedTheme) {
@@ -441,12 +452,11 @@ API.initTheme();
       const userId = parseInt(item.dataset.id, 10);
       if (!userId) return;
 
-      if (e.target.classList.contains('save-admin-user')) {
-        const payload = {
-          name: item.querySelector('.admin-name-input').value.trim(),
-          grade: parseInt(item.querySelector('.admin-grade-select').value, 10),
-          class_number: parseInt(item.querySelector('.admin-class-select').value, 10)
-        };
+        if (e.target.classList.contains('save-admin-user')) {
+          const payload = {
+            grade: parseInt(item.querySelector('.admin-grade-select').value, 10),
+            class_number: parseInt(item.querySelector('.admin-class-select').value, 10)
+          };
         const res = await API.updateAdminUser(userId, payload);
         if (!res || res.error) {
           alert(res?.error || '저장에 실패했습니다.');
@@ -506,13 +516,26 @@ API.initTheme();
       await API.refreshNotifications();
     });
 
-    document.querySelectorAll('.admin-accordion-toggle').forEach(button => {
-      button.addEventListener('click', () => {
-        const panel = document.getElementById(button.dataset.target);
-        const isOpen = button.classList.toggle('open');
-        panel.classList.toggle('show', isOpen);
+      document.querySelectorAll('.admin-accordion-toggle').forEach(button => {
+        button.addEventListener('click', async () => {
+          const panel = document.getElementById(button.dataset.target);
+          const isOpen = button.classList.toggle('open');
+          panel.classList.toggle('show', isOpen);
+          if (!isOpen) return;
+
+          if (button.dataset.target === 'adminAssignmentPanel') {
+            await ensureAdminSectionLoaded('assignment');
+            return;
+          }
+          if (button.dataset.target === 'adminMessagePanel') {
+            await ensureAdminSectionLoaded('message');
+            return;
+          }
+          if (button.dataset.target === 'adminUserPanel') {
+            await ensureAdminSectionLoaded('user');
+          }
+        });
       });
-    });
 
     document.getElementById('adminSettingsAssignmentGrade').addEventListener('change', async (e) => {
       adminSettingsState.assignmentGrade = e.target.value;
