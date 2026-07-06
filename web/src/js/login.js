@@ -1,6 +1,55 @@
 let googleClientId = null;
-    let googleSetupToken = null;
-    let googleButtonRendered = false;
+let googleSetupToken = null;
+let googleButtonRendered = false;
+let googleSignInInFlight = false;
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function setGoogleUiBusy(isBusy) {
+  googleSignInInFlight = isBusy;
+  const loginBox = document.getElementById('googleLoginBox');
+  const profileButton = document.getElementById('googleProfileBtn');
+  const cancelButton = document.getElementById('cancelGoogleSetup');
+
+  if (loginBox) {
+    loginBox.style.pointerEvents = isBusy ? 'none' : '';
+    loginBox.style.opacity = isBusy ? '0.7' : '';
+  }
+  if (profileButton) {
+    profileButton.disabled = isBusy;
+    profileButton.textContent = isBusy ? '처리 중...' : '시작하기';
+  }
+  if (cancelButton) {
+    cancelButton.style.pointerEvents = isBusy ? 'none' : '';
+    cancelButton.style.opacity = isBusy ? '0.6' : '';
+  }
+}
+
+async function finalizeGoogleLogin(user) {
+  API.setUser(user);
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const sessionUser = await API.me().catch(() => null);
+    if (sessionUser?.user_id) {
+      API.setUser({
+        id: sessionUser.user_id,
+        name: sessionUser.name,
+        grade: sessionUser.grade,
+        class_number: sessionUser.class_number,
+        profile_image_url: sessionUser.profile_image_url,
+        is_alarm_enabled: sessionUser.is_alarm_enabled,
+        is_admin: sessionUser.is_admin
+      });
+      window.location.replace('calendar.html');
+      return;
+    }
+    await sleep(250);
+  }
+
+  showError('로그인 세션을 확인하는 중 문제가 생겼습니다. 잠시 후 다시 시도해주세요.');
+}
 
     function showError(msg) {
       const el = document.getElementById('authError');
@@ -31,20 +80,25 @@ let googleClientId = null;
       return window.google?.accounts?.id || null;
     }
 
-    async function handleGoogleCredential(credential) {
-      hideError();
-      const res = await API.googleAuth(credential);
-      if (!res || res.error) {
-        showError(res?.error || '구글 로그인에 실패했습니다.');
-        return;
-      }
-      if (res.requiresProfile) {
-        showGoogleProfileForm(res.profile, res.setupToken);
-        return;
-      }
-      API.setUser(res.user);
-      window.location.href = 'calendar.html';
+async function handleGoogleCredential(credential) {
+  if (googleSignInInFlight) return;
+  hideError();
+  setGoogleUiBusy(true);
+  try {
+    const res = await API.googleAuth(credential);
+    if (!res || res.error) {
+      showError(res?.error || '구글 로그인에 실패했습니다.');
+      return;
     }
+    if (res.requiresProfile) {
+      showGoogleProfileForm(res.profile, res.setupToken);
+      return;
+    }
+    await finalizeGoogleLogin(res.user);
+  } finally {
+    setGoogleUiBusy(false);
+  }
+}
 
     function renderGoogleLoginIfNeeded() {
       if (!googleClientId || googleButtonRendered) return;
@@ -92,32 +146,38 @@ let googleClientId = null;
       showError('구글 로그인이 아직 설정되지 않았습니다.');
     }
 
-    document.getElementById('cancelGoogleSetup').addEventListener('click', () => {
-      googleSetupToken = null;
-      showLoginForm();
-    });
+document.getElementById('cancelGoogleSetup').addEventListener('click', () => {
+  if (googleSignInInFlight) return;
+  googleSetupToken = null;
+  showLoginForm();
+});
 
-    document.getElementById('googleProfileBtn').addEventListener('click', async () => {
-      hideError();
-      if (!googleSetupToken) {
-        showError('구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.');
-        showLoginForm();
-        return;
-      }
+document.getElementById('googleProfileBtn').addEventListener('click', async () => {
+  if (googleSignInInFlight) return;
+  hideError();
+  if (!googleSetupToken) {
+    showError('구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.');
+    showLoginForm();
+    return;
+  }
 
-      const payload = {
-        setupToken: googleSetupToken,
-        grade: parseInt(document.getElementById('googleGrade').value, 10),
-        class_number: parseInt(document.getElementById('googleClass').value, 10)
-      };
-      const res = await API.googleRegister(payload);
-      if (!res || res.error) {
-        showError(res?.error || '구글 가입을 완료하지 못했습니다.');
-        return;
-      }
-      API.setUser(res.user);
-      window.location.href = 'calendar.html';
-    });
+  setGoogleUiBusy(true);
+  try {
+    const payload = {
+      setupToken: googleSetupToken,
+      grade: parseInt(document.getElementById('googleGrade').value, 10),
+      class_number: parseInt(document.getElementById('googleClass').value, 10)
+    };
+    const res = await API.googleRegister(payload);
+    if (!res || res.error) {
+      showError(res?.error || '구글 가입을 완료하지 못했습니다.');
+      return;
+    }
+    await finalizeGoogleLogin(res.user);
+  } finally {
+    setGoogleUiBusy(false);
+  }
+});
 
     API.me().then(data => {
       if (data && data.user_id) {

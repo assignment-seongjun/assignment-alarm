@@ -58,12 +58,21 @@ const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
 const AUTH_RATE_MAX_TRACKED_CLIENTS = Math.max(Number.parseInt(process.env.AUTH_RATE_MAX_TRACKED_CLIENTS || '5000', 10) || 5000, 1000);
+const CHATBOT_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.CHATBOT_RATE_WINDOW_MS || '300000', 10) || 300000, 60000);
+const CHATBOT_RATE_LIMIT = Math.max(Number.parseInt(process.env.CHATBOT_RATE_LIMIT || '12', 10) || 12, 1);
+const ASSIGNMENT_IMAGE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASSIGNMENT_IMAGE_RATE_WINDOW_MS || '600000', 10) || 600000, 60000);
+const ASSIGNMENT_IMAGE_RATE_LIMIT = Math.max(Number.parseInt(process.env.ASSIGNMENT_IMAGE_RATE_LIMIT || '10', 10) || 10, 1);
+const ASSIGNMENT_WRITE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASSIGNMENT_WRITE_RATE_WINDOW_MS || '600000', 10) || 600000, 60000);
+const ASSIGNMENT_WRITE_RATE_LIMIT = Math.max(Number.parseInt(process.env.ASSIGNMENT_WRITE_RATE_LIMIT || '20', 10) || 20, 1);
 const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
 const CHATBOT_MAX_HISTORY_ITEMS = 10;
 const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 12;
 const CHATBOT_CONTEXT_CONTENT_LENGTH = 180;
 const CHATBOT_CONTEXT_TITLE_LENGTH = 80;
 const authAttempts = new Map();
+const chatbotAttempts = new Map();
+const assignmentImageAttempts = new Map();
+const assignmentWriteAttempts = new Map();
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const gemini = GEMINI_API_KEY
   ? new OpenAI({ apiKey: GEMINI_API_KEY, baseURL: GEMINI_BASE_URL })
@@ -475,39 +484,169 @@ async function findUserByGoogleSub(googleSub) {
   return rows[0] || null;
 }
 
-function cleanupExpiredAuthAttempts(now = Date.now()) {
-  for (const [key, value] of authAttempts.entries()) {
+async function findLegacyUserForGoogleProfile(profile) {
+  const normalizedName = normalizeGoogleName(profile?.name);
+  if (!normalizedName) return null;
+  const [rows] = await pool.execute(
+    `SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin, google_sub, google_email
+       FROM users
+      WHERE google_sub IS NULL
+        AND name = ?
+      LIMIT 1`,
+    [normalizedName]
+  );
+  return rows[0] || null;
+}
+
+async function linkGoogleProfileToExistingUser(userId, profile, shouldGrantAdmin, overrides = {}) {
+  const nextGrade = parseInteger(overrides.grade);
+  const nextClassNumber = parseInteger(overrides.class_number);
+  const shouldUpdateGrade = Number.isInteger(nextGrade) && nextGrade >= 1 && nextGrade <= MAX_GRADE;
+  const shouldUpdateClass = Number.isInteger(nextClassNumber) && nextClassNumber >= 1 && nextClassNumber <= MAX_CLASS;
+
+  const updates = [
+    'google_sub = ?',
+    'google_email = ?',
+    'profile_image_url = COALESCE(?, profile_image_url)'
+  ];
+  const values = [
+    profile.google_sub,
+    profile.google_email,
+    profile.profile_image_url
+  ];
+
+  if (shouldGrantAdmin) {
+    updates.push('is_admin = 1');
+  }
+  if (shouldUpdateGrade) {
+    updates.push('grade = ?');
+    values.push(nextGrade);
+  }
+  if (shouldUpdateClass) {
+    updates.push('class_number = ?');
+    values.push(nextClassNumber);
+  }
+
+  values.push(userId);
+  await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`, values);
+
+  const [rows] = await pool.execute(
+    'SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin, google_sub, google_email FROM users WHERE user_id = ? LIMIT 1',
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+function cleanupExpiredAttempts(store, now = Date.now()) {
+  for (const [key, value] of store.entries()) {
     if (!value || value.expiresAt <= now) {
-      authAttempts.delete(key);
+      store.delete(key);
     }
   }
+}
+
+function consumeRateLimitAttempt(store, key, { windowMs, limit, maxTrackedClients }, now = Date.now()) {
+  cleanupExpiredAttempts(store, now);
+  const entry = store.get(key);
+  if (!entry || entry.expiresAt <= now) {
+    if (store.size >= maxTrackedClients) {
+      const oldestKey = store.keys().next().value;
+      if (oldestKey !== undefined) {
+        store.delete(oldestKey);
+      }
+    }
+    store.set(key, { count: 1, expiresAt: now + windowMs });
+    return { allowed: true };
+  }
+  if (entry.count >= limit) {
+    return { allowed: false, retryAfterMs: Math.max(entry.expiresAt - now, 1000) };
+  }
+  entry.count += 1;
+  return { allowed: true };
 }
 
 function authRateLimit(req, res, next) {
   const key = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
-  cleanupExpiredAuthAttempts(now);
-  const entry = authAttempts.get(key);
-  if (!entry || entry.expiresAt <= now) {
-    if (authAttempts.size >= AUTH_RATE_MAX_TRACKED_CLIENTS) {
-      const oldestKey = authAttempts.keys().next().value;
-      if (oldestKey !== undefined) {
-        authAttempts.delete(oldestKey);
-      }
-    }
-    authAttempts.set(key, { count: 1, expiresAt: now + AUTH_RATE_WINDOW_MS });
-    return next();
-  }
-  if (entry.count >= AUTH_RATE_LIMIT) {
+  const result = consumeRateLimitAttempt(
+    authAttempts,
+    key,
+    {
+      windowMs: AUTH_RATE_WINDOW_MS,
+      limit: AUTH_RATE_LIMIT,
+      maxTrackedClients: AUTH_RATE_MAX_TRACKED_CLIENTS
+    },
+    now
+  );
+  if (!result.allowed) {
     return res.status(429).json({ error: '잠시 후 다시 시도해주세요.' });
   }
-  entry.count += 1;
   next();
 }
 
 function clearAuthRateLimit(req) {
   const key = req.ip || req.socket.remoteAddress || 'unknown';
   authAttempts.delete(key);
+}
+
+function chatbotRateLimit(req, res, next) {
+  const key = req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket.remoteAddress || 'unknown');
+  const result = consumeRateLimitAttempt(
+    chatbotAttempts,
+    key,
+    {
+      windowMs: CHATBOT_RATE_WINDOW_MS,
+      limit: CHATBOT_RATE_LIMIT,
+      maxTrackedClients: AUTH_RATE_MAX_TRACKED_CLIENTS
+    }
+  );
+
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.ceil((result.retryAfterMs || CHATBOT_RATE_WINDOW_MS) / 1000)));
+    return res.status(429).json({ error: '챗봇 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' });
+  }
+
+  next();
+}
+
+function assignmentImageRateLimit(req, res, next) {
+  const key = req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket.remoteAddress || 'unknown');
+  const result = consumeRateLimitAttempt(
+    assignmentImageAttempts,
+    key,
+    {
+      windowMs: ASSIGNMENT_IMAGE_RATE_WINDOW_MS,
+      limit: ASSIGNMENT_IMAGE_RATE_LIMIT,
+      maxTrackedClients: AUTH_RATE_MAX_TRACKED_CLIENTS
+    }
+  );
+
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.ceil((result.retryAfterMs || ASSIGNMENT_IMAGE_RATE_WINDOW_MS) / 1000)));
+    return res.status(429).json({ error: '이미지 업로드 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' });
+  }
+
+  next();
+}
+
+function assignmentWriteRateLimit(req, res, next) {
+  const key = req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket.remoteAddress || 'unknown');
+  const result = consumeRateLimitAttempt(
+    assignmentWriteAttempts,
+    key,
+    {
+      windowMs: ASSIGNMENT_WRITE_RATE_WINDOW_MS,
+      limit: ASSIGNMENT_WRITE_RATE_LIMIT,
+      maxTrackedClients: AUTH_RATE_MAX_TRACKED_CLIENTS
+    }
+  );
+
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.ceil((result.retryAfterMs || ASSIGNMENT_WRITE_RATE_WINDOW_MS) / 1000)));
+    return res.status(429).json({ error: '과제 변경 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' });
+  }
+
+  next();
 }
 
 function authMiddleware(req, res, next) {
@@ -816,6 +955,32 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
       });
     }
 
+    const legacyUser = await findLegacyUserForGoogleProfile(profile);
+    if (legacyUser) {
+      const shouldGrantAdmin = isAdminEmail(profile.google_email);
+      const linkedUser = await linkGoogleProfileToExistingUser(legacyUser.user_id, profile, shouldGrantAdmin);
+      const user = {
+        id: linkedUser.user_id,
+        name: linkedUser.name,
+        grade: linkedUser.grade,
+        class_number: linkedUser.class_number,
+        is_admin: linkedUser.is_admin
+      };
+      setAuthCookie(res, createToken(user));
+      clearAuthRateLimit(req);
+      return res.json({
+        user: {
+          id: linkedUser.user_id,
+          name: linkedUser.name,
+          grade: linkedUser.grade,
+          class_number: linkedUser.class_number,
+          profile_image_url: linkedUser.profile_image_url,
+          is_alarm_enabled: linkedUser.is_alarm_enabled,
+          is_admin: linkedUser.is_admin
+        }
+      });
+    }
+
     return res.json({
       requiresProfile: true,
       setupToken: createGoogleSetupToken(profile),
@@ -887,6 +1052,37 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
       });
     }
 
+    const legacyUser = await findLegacyUserForGoogleProfile(decoded.profile);
+    if (legacyUser) {
+      const shouldGrantAdmin = isAdminEmail(decoded.profile.google_email);
+      const linkedUser = await linkGoogleProfileToExistingUser(
+        legacyUser.user_id,
+        decoded.profile,
+        shouldGrantAdmin,
+        { grade, class_number }
+      );
+      const user = {
+        id: linkedUser.user_id,
+        name: linkedUser.name,
+        grade: linkedUser.grade,
+        class_number: linkedUser.class_number,
+        is_admin: linkedUser.is_admin
+      };
+      setAuthCookie(res, createToken(user));
+      clearAuthRateLimit(req);
+      return res.json({
+        user: {
+          id: linkedUser.user_id,
+          name: linkedUser.name,
+          grade: linkedUser.grade,
+          class_number: linkedUser.class_number,
+          profile_image_url: linkedUser.profile_image_url,
+          is_alarm_enabled: linkedUser.is_alarm_enabled,
+          is_admin: linkedUser.is_admin
+        }
+      });
+    }
+
     const uniqueName = normalizeGoogleName(decoded.profile.name);
     const isAdmin = isAdminEmail(decoded.profile.google_email) ? 1 : 0;
     const passwordHash = await bcrypt.hash(`google:${decoded.profile.google_sub}:${crypto.randomBytes(8).toString('hex')}`, 10);
@@ -931,7 +1127,7 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/uploads/assignment-image', authMiddleware, async (req, res) => {
+app.post('/api/uploads/assignment-image', authMiddleware, assignmentImageRateLimit, async (req, res) => {
   try {
     const imageDataUrl = String(req.body.image_data_url || '');
     if (!imageDataUrl) {
@@ -1252,7 +1448,7 @@ app.get('/api/assignments', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/assignments', authMiddleware, async (req, res) => {
+app.post('/api/assignments', authMiddleware, assignmentWriteRateLimit, async (req, res) => {
   try {
     const title = String(req.body.title || '').trim();
     const content = req.body.content === undefined || req.body.content === null ? null : String(req.body.content).trim();
@@ -1289,7 +1485,7 @@ app.post('/api/assignments', authMiddleware, async (req, res) => {
   }
 });
 
-app.put('/api/assignments/:id', authMiddleware, async (req, res) => {
+app.put('/api/assignments/:id', authMiddleware, assignmentWriteRateLimit, async (req, res) => {
   try {
     const [rows] = await pool.execute(
       'SELECT created_by, target_grade, target_class FROM assignments WHERE assignment_id = ?',
@@ -1402,7 +1598,7 @@ app.get('/api/assignments/:id/status', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/assignments/:id', authMiddleware, async (req, res) => {
+app.delete('/api/assignments/:id', authMiddleware, assignmentWriteRateLimit, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT created_by FROM assignments WHERE assignment_id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
@@ -1509,6 +1705,10 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
 app.get('/api/notifications', authMiddleware, async (req, res) => {
   try {
     const limit = 12;
+    const currentUser = await getCurrentUser(req.user.id);
+    if (!currentUser) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
 
     let assignmentSql = `
       SELECT a.assignment_id, a.title, a.due_date, a.created_at, a.target_grade, a.target_class, u.name AS creator_name
@@ -1524,12 +1724,12 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     `;
     let messageParams = [];
 
-    if (!req.user.is_admin) {
+    if (!isAdminUser(currentUser)) {
       assignmentSql += ' WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL)';
-      assignmentParams = [req.user.grade, req.user.class_number];
+      assignmentParams = [currentUser.grade, currentUser.class_number];
 
       messageSql += ' WHERE m.target_grade = ? AND ((m.type = ? AND m.target_class IS NULL) OR (m.type = ? AND m.target_class = ?))';
-      messageParams = [req.user.grade, 'grade', 'class', req.user.class_number];
+      messageParams = [currentUser.grade, 'grade', 'class', currentUser.class_number];
     }
 
     assignmentSql += ' ORDER BY a.created_at DESC LIMIT ?';
@@ -1615,7 +1815,7 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/chatbot', authMiddleware, async (req, res) => {
+app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
   try {
     if (!gemini) {
       return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 잠시 후 다시 시도해주세요.' });
