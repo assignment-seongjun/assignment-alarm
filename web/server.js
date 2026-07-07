@@ -73,6 +73,7 @@ const authAttempts = new Map();
 const chatbotAttempts = new Map();
 const assignmentImageAttempts = new Map();
 const assignmentWriteAttempts = new Map();
+const adminUserCache = new Map();
 const adminAssignmentCache = new Map();
 const adminMessageCache = new Map();
 const notificationCache = new Map();
@@ -355,7 +356,10 @@ function setCachedResponse(cache, key, value) {
   return value;
 }
 
-function clearResponseCaches({ assignments = false, messages = false, notifications = false } = {}) {
+function clearResponseCaches({ users = false, assignments = false, messages = false, notifications = false } = {}) {
+  if (users) {
+    adminUserCache.clear();
+  }
   if (assignments) {
     adminAssignmentCache.clear();
   }
@@ -1368,19 +1372,31 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
     const adminUser = await ensureAdminAccess(req, res);
     if (!adminUser) return;
     const { page, pageSize, offset } = parsePagination(req.query);
+    const cacheKey = JSON.stringify({ page, pageSize, scope: 'admin-users' });
+    const cached = getCachedResponse(adminUserCache, cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     const [[countRow]] = await pool.execute('SELECT COUNT(*) AS total FROM users');
     const [rows] = await pool.execute(
       'SELECT user_id, name, grade, class_number, is_alarm_enabled, is_admin, created_at FROM users ORDER BY is_admin DESC, grade ASC, class_number ASC, name ASC LIMIT ? OFFSET ?',
       [pageSize, offset]
     );
-    res.json({
+    const payload = {
       items: rows,
       total: Number(countRow.total) || 0,
       page,
       pageSize
+    };
+    res.json(setCachedResponse(adminUserCache, cacheKey, payload));
+  } catch (error) {
+    logApiError('GET /api/admin/users failed', error, { query: req.query, userId: req.user?.id });
+    res.json({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: ADMIN_PAGE_SIZE_DEFAULT
     });
-  } catch {
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -1565,6 +1581,7 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
     if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
     values.push(targetUserId);
     await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`, values);
+    clearResponseCaches({ users: true, notifications: true });
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1601,7 +1618,7 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
         connection.release();
       }
 
-      clearResponseCaches({ assignments: true, messages: true, notifications: true });
+      clearResponseCaches({ users: true, assignments: true, messages: true, notifications: true });
       res.json({ success: true });
     } catch (error) {
       logApiError('DELETE /api/admin/users/:id failed', error, { targetUserId: req.params.id, actorUserId: req.user?.id });
