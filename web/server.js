@@ -66,13 +66,15 @@ const ASSIGNMENT_WRITE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASS
 const ASSIGNMENT_WRITE_RATE_LIMIT = Math.max(Number.parseInt(process.env.ASSIGNMENT_WRITE_RATE_LIMIT || '20', 10) || 20, 1);
 const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
 const CHATBOT_MAX_HISTORY_ITEMS = 10;
-const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 12;
-const CHATBOT_CONTEXT_CONTENT_LENGTH = 180;
-const CHATBOT_CONTEXT_TITLE_LENGTH = 80;
-const CHATBOT_RETRY_COUNT = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_COUNT || '1', 10) || 1, 0);
-const CHATBOT_RETRY_DELAY_MS = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_DELAY_MS || '1200', 10) || 1200, 0);
+const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 8;
+const CHATBOT_CONTEXT_CONTENT_LENGTH = 120;
+const CHATBOT_CONTEXT_TITLE_LENGTH = 60;
+const CHATBOT_RETRY_COUNT = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_COUNT || '2', 10) || 2, 0);
+const CHATBOT_RETRY_DELAY_MS = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_DELAY_MS || '1500', 10) || 1500, 0);
+const CHATBOT_RESPONSE_CACHE_TTL_MS = Math.max(Number.parseInt(process.env.CHATBOT_RESPONSE_CACHE_TTL_MS || '45000', 10) || 45000, 5000);
 const authAttempts = new Map();
 const chatbotAttempts = new Map();
+const chatbotResponseCache = new Map();
 const assignmentImageAttempts = new Map();
 const assignmentWriteAttempts = new Map();
 const adminUserCache = new Map();
@@ -421,6 +423,36 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getChatbotResponseCacheKey(userId, rawMessage, history) {
+  return JSON.stringify({
+    userId,
+    rawMessage: String(rawMessage || '').trim(),
+    history: Array.isArray(history)
+      ? history.map((item) => ({
+        role: item?.role,
+        content: String(item?.content || '').trim()
+      }))
+      : []
+  });
+}
+
+function getCachedChatbotResponse(cacheKey) {
+  const entry = chatbotResponseCache.get(cacheKey);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > CHATBOT_RESPONSE_CACHE_TTL_MS) {
+    chatbotResponseCache.delete(cacheKey);
+    return null;
+  }
+  return entry.reply;
+}
+
+function setCachedChatbotResponse(cacheKey, reply) {
+  chatbotResponseCache.set(cacheKey, {
+    reply,
+    cachedAt: Date.now()
+  });
+}
+
 function isChatbotTransientError(error) {
   const status = Number(error?.status || error?.code || 0);
   const code = String(error?.code || '').toUpperCase();
@@ -454,7 +486,7 @@ async function requestChatbotCompletion(messages) {
       if (!isChatbotTransientError(error) || attempt >= CHATBOT_RETRY_COUNT) {
         throw error;
       }
-      await wait(CHATBOT_RETRY_DELAY_MS);
+      await wait(CHATBOT_RETRY_DELAY_MS * (attempt + 1));
     }
   }
 
@@ -2124,6 +2156,15 @@ app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
     }
 
     const history = normalizeChatHistory(req.body.history);
+    const cacheKey = getChatbotResponseCacheKey(currentUser.user_id, rawMessage, history);
+    const cachedReply = getCachedChatbotResponse(cacheKey);
+    if (cachedReply) {
+      return res.json({
+        success: true,
+        reply: cachedReply
+      });
+    }
+
     const chatbotContext = await buildChatbotContext(currentUser);
     const messages = [
       {
@@ -2153,6 +2194,7 @@ app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
       return res.status(502).json({ error: '챗봇 응답이 비어 있습니다. 잠시 후 다시 시도해주세요.' });
     }
 
+    setCachedChatbotResponse(cacheKey, reply);
     res.json({
       success: true,
       reply
@@ -2163,7 +2205,7 @@ app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
       return res.status(502).json({ success: false, error: 'AI 챗봇 설정에 문제가 있습니다. 관리자에게 문의해주세요.' });
     }
     if (error?.status === 429) {
-      return res.status(503).json({ success: false, error: 'AI 요청이 많아 잠시 응답이 어렵습니다. 잠시 후 다시 시도해주세요.' });
+      return res.status(503).json({ success: false, error: 'AI 사용량 한도에 잠시 걸렸습니다. 1~2분 후 다시 시도해주세요.' });
     }
     if (isChatbotTransientError(error)) {
       return res.status(503).json({ success: false, error: 'AI 서버 연결이 잠시 불안정합니다. 잠시 후 다시 시도해주세요.' });
