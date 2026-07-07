@@ -1243,13 +1243,13 @@ app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
       params
     );
     const [rows] = await pool.execute(
-      `SELECT a.*, u.name AS creator_name
-         FROM assignments a
-         JOIN users u ON a.created_by = u.user_id${whereSql}
-        ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC
-        LIMIT ? OFFSET ?`,
-      params.concat([pageSize, offset])
-    );
+        `SELECT a.*, COALESCE(u.name, '삭제된 사용자') AS creator_name
+           FROM assignments a
+           LEFT JOIN users u ON a.created_by = u.user_id${whereSql}
+          ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC
+          LIMIT ? OFFSET ?`,
+        params.concat([pageSize, offset])
+      );
 
     res.json({
       items: rows,
@@ -1303,13 +1303,13 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
       params
     );
     const [rows] = await pool.execute(
-      `SELECT m.*, u.name AS sender_name
-         FROM messages m
-         JOIN users u ON m.sender_id = u.user_id${whereSql}
-        ORDER BY m.created_at DESC
-        LIMIT ? OFFSET ?`,
-      params.concat([pageSize, offset])
-    );
+        `SELECT m.*, COALESCE(u.name, '삭제된 사용자') AS sender_name
+           FROM messages m
+           LEFT JOIN users u ON m.sender_id = u.user_id${whereSql}
+          ORDER BY m.created_at DESC
+          LIMIT ? OFFSET ?`,
+        params.concat([pageSize, offset])
+      );
 
     res.json({
       items: rows,
@@ -1371,24 +1371,41 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
-  try {
-    const adminUser = await ensureAdminAccess(req, res);
-    if (!adminUser) return;
-    const targetUserId = parseInteger(req.params.id);
+  app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
+    try {
+      const adminUser = await ensureAdminAccess(req, res);
+      if (!adminUser) return;
+      const targetUserId = parseInteger(req.params.id);
     if (!targetUserId) return res.status(400).json({ error: '사용자 정보가 올바르지 않습니다.' });
     if (targetUserId === req.user.id) return res.status(400).json({ error: '본인 계정은 삭제할 수 없습니다.' });
 
-    const [rows] = await pool.execute('SELECT is_admin FROM users WHERE user_id = ? LIMIT 1', [targetUserId]);
-    if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    if (isAdminUser(rows[0])) return res.status(400).json({ error: '관리자 계정은 삭제할 수 없습니다.' });
+      const [rows] = await pool.execute('SELECT is_admin FROM users WHERE user_id = ? LIMIT 1', [targetUserId]);
+      if (rows.length === 0) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+      if (isAdminUser(rows[0])) return res.status(400).json({ error: '관리자 계정은 삭제할 수 없습니다.' });
 
-    await pool.execute('DELETE FROM users WHERE user_id = ?', [targetUserId]);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-  }
-});
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        await connection.execute('DELETE FROM user_assignments WHERE user_id = ?', [targetUserId]);
+        await connection.execute('DELETE FROM user_assignments WHERE assignment_id IN (SELECT assignment_id FROM assignments WHERE created_by = ?)', [targetUserId]);
+        await connection.execute('DELETE FROM assignments WHERE created_by = ?', [targetUserId]);
+        await connection.execute('DELETE FROM messages WHERE sender_id = ?', [targetUserId]);
+        await connection.execute('DELETE FROM users WHERE user_id = ?', [targetUserId]);
+
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    }
+  });
 
   app.put('/api/users/:id', authMiddleware, async (req, res) => {
     try {
@@ -1424,14 +1441,14 @@ app.get('/api/assignments', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     if (isAdminUser(user)) {
       const [rows] = await pool.execute(
-        'SELECT a.*, u.name AS creator_name FROM assignments a JOIN users u ON a.created_by = u.user_id ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC'
+          'SELECT a.*, COALESCE(u.name, \'삭제된 사용자\') AS creator_name FROM assignments a LEFT JOIN users u ON a.created_by = u.user_id ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC'
+        );
+        return res.json(rows);
+      }
+      const [rows] = await pool.execute(
+        'SELECT a.*, COALESCE(u.name, \'삭제된 사용자\') AS creator_name FROM assignments a LEFT JOIN users u ON a.created_by = u.user_id WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL) ORDER BY a.due_date ASC',
+        [user.grade, user.class_number]
       );
-      return res.json(rows);
-    }
-    const [rows] = await pool.execute(
-      'SELECT a.*, u.name AS creator_name FROM assignments a JOIN users u ON a.created_by = u.user_id WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL) ORDER BY a.due_date ASC',
-      [user.grade, user.class_number]
-    );
     res.json(rows);
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1646,14 +1663,14 @@ app.get('/api/users/:userId/assignments', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     if (isAdminUser(user)) {
       const [rows] = await pool.execute(
-        'SELECT a.*, u.name AS creator_name, 0 AS is_completed FROM assignments a JOIN users u ON a.created_by = u.user_id ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC'
+          'SELECT a.*, COALESCE(u.name, \'삭제된 사용자\') AS creator_name, 0 AS is_completed FROM assignments a LEFT JOIN users u ON a.created_by = u.user_id ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC'
+        );
+        return res.json(rows);
+      }
+      const [rows] = await pool.execute(
+        'SELECT a.*, COALESCE(u.name, \'삭제된 사용자\') AS creator_name, COALESCE(ua.is_completed, 0) AS is_completed FROM assignments a LEFT JOIN users u ON a.created_by = u.user_id LEFT JOIN user_assignments ua ON a.assignment_id = ua.assignment_id AND ua.user_id = ? WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL) ORDER BY a.due_date ASC',
+        [userId, user.grade, user.class_number]
       );
-      return res.json(rows);
-    }
-    const [rows] = await pool.execute(
-      'SELECT a.*, u.name AS creator_name, COALESCE(ua.is_completed, 0) AS is_completed FROM assignments a JOIN users u ON a.created_by = u.user_id LEFT JOIN user_assignments ua ON a.assignment_id = ua.assignment_id AND ua.user_id = ? WHERE a.target_grade = ? AND (a.target_class = ? OR a.target_class IS NULL) ORDER BY a.due_date ASC',
-      [userId, user.grade, user.class_number]
-    );
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1668,7 +1685,7 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
     const type = req.query.type ? String(req.query.type) : null;
     if (type && !['grade', 'class'].includes(type)) return res.status(400).json({ error: '메세지 유형이 올바르지 않습니다.' });
     if (isAdminUser(user)) {
-      let sql = 'SELECT m.*, u.name AS sender_name FROM messages m JOIN users u ON m.sender_id = u.user_id';
+        let sql = 'SELECT m.*, COALESCE(u.name, \'삭제된 사용자\') AS sender_name FROM messages m LEFT JOIN users u ON m.sender_id = u.user_id';
       const params = [];
       if (type) {
         sql += ' WHERE m.type = ?';
@@ -1678,7 +1695,7 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
       const [rows] = await pool.execute(sql, params);
       return res.json(rows);
     }
-    let sql = 'SELECT m.*, u.name AS sender_name FROM messages m JOIN users u ON m.sender_id = u.user_id WHERE m.target_grade = ? AND ((m.type = ? AND m.target_class IS NULL) OR (m.type = ? AND m.target_class = ?))';
+      let sql = 'SELECT m.*, COALESCE(u.name, \'삭제된 사용자\') AS sender_name FROM messages m LEFT JOIN users u ON m.sender_id = u.user_id WHERE m.target_grade = ? AND ((m.type = ? AND m.target_class IS NULL) OR (m.type = ? AND m.target_class = ?))';
     const params = [user.grade, 'grade', 'class', user.class_number];
     if (type) {
       sql += ' AND m.type = ?';
@@ -1701,17 +1718,17 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     }
 
     let assignmentSql = `
-      SELECT a.assignment_id, a.title, a.due_date, a.created_at, a.target_grade, a.target_class, u.name AS creator_name
-      FROM assignments a
-      JOIN users u ON a.created_by = u.user_id
-    `;
+        SELECT a.assignment_id, a.title, a.due_date, a.created_at, a.target_grade, a.target_class, COALESCE(u.name, '삭제된 사용자') AS creator_name
+        FROM assignments a
+        LEFT JOIN users u ON a.created_by = u.user_id
+      `;
     let assignmentParams = [];
 
     let messageSql = `
-      SELECT m.message_id, m.content, m.created_at, m.type, m.target_grade, m.target_class, u.name AS sender_name
-      FROM messages m
-      JOIN users u ON m.sender_id = u.user_id
-    `;
+        SELECT m.message_id, m.content, m.created_at, m.type, m.target_grade, m.target_class, COALESCE(u.name, '삭제된 사용자') AS sender_name
+        FROM messages m
+        LEFT JOIN users u ON m.sender_id = u.user_id
+      `;
     let messageParams = [];
 
     if (!isAdminUser(currentUser)) {
