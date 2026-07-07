@@ -69,6 +69,8 @@ const CHATBOT_MAX_HISTORY_ITEMS = 10;
 const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 12;
 const CHATBOT_CONTEXT_CONTENT_LENGTH = 180;
 const CHATBOT_CONTEXT_TITLE_LENGTH = 80;
+const CHATBOT_RETRY_COUNT = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_COUNT || '1', 10) || 1, 0);
+const CHATBOT_RETRY_DELAY_MS = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_DELAY_MS || '1200', 10) || 1200, 0);
 const authAttempts = new Map();
 const chatbotAttempts = new Map();
 const assignmentImageAttempts = new Map();
@@ -415,36 +417,48 @@ function toSqlLimit(value, fallback) {
   return numeric;
 }
 
-function buildChatbotFallbackReply(user, rawMessage = '') {
-  const message = String(rawMessage || '').trim();
-  const scope = user?.grade && user?.class_number
-    ? `${user.grade}학년 ${user.class_number}반`
-    : '현재 소속';
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  if (message.includes('계획') || message.includes('공부')) {
-    return [
-      '지금 AI 응답이 잠시 불안정해서 먼저 짧게 정리해드릴게요.',
-      `1. ${scope} 기준으로 오늘 마감 과제부터 확인하기`,
-      '2. 오래 걸리는 과제는 25분씩 나눠서 시작하기',
-      '3. 완료한 과제는 바로 제출 체크해서 남은 과제만 보이게 하기'
-    ].join('\n');
-  }
+function isChatbotTransientError(error) {
+  const status = Number(error?.status || error?.code || 0);
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
 
-  if (message.includes('과제') || message.includes('숙제') || message.includes('마감')) {
-    return [
-      '지금 AI 서버 응답이 잠시 늦어서 간단히 먼저 도와드릴게요.',
-      '과제는 보통 이렇게 처리하면 제일 덜 밀립니다.',
-      '1. 마감일이 빠른 순서대로 정리',
-      '2. 설명이 긴 과제는 핵심 해야 할 일만 따로 메모',
-      '3. 제출 직후 완료 체크'
-    ].join('\n');
+  if ([408, 409, 425, 429].includes(status) || status >= 500) {
+    return true;
   }
 
   return [
-    '지금 AI 응답이 잠시 불안정합니다.',
-    `${scope} 기준으로 캘린더와 공지를 먼저 확인하고,`,
-    '질문을 조금 더 짧게 다시 보내면 바로 이어서 도와드릴게요.'
-  ].join('\n');
+    'ETIMEDOUT',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ECONNABORTED',
+    'EAI_AGAIN',
+    'ENOTFOUND'
+  ].includes(code) || message.includes('timeout') || message.includes('timed out');
+}
+
+async function requestChatbotCompletion(messages) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= CHATBOT_RETRY_COUNT; attempt += 1) {
+    try {
+      return await gemini.chat.completions.create({
+        model: GEMINI_CHAT_MODEL,
+        messages
+      });
+    } catch (error) {
+      lastError = error;
+      if (!isChatbotTransientError(error) || attempt >= CHATBOT_RETRY_COUNT) {
+        throw error;
+      }
+      await wait(CHATBOT_RETRY_DELAY_MS);
+    }
+  }
+
+  throw lastError || new Error('chatbot-request-failed');
 }
 
 function normalizeBooleanFlag(value) {
@@ -2093,22 +2107,17 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
-  let currentUser = null;
-  let rawMessage = '';
   try {
     if (!gemini) {
-      return res.json({
-        success: true,
-        reply: buildChatbotFallbackReply(null, '')
-      });
+      return res.status(503).json({ success: false, error: 'AI 챗봇이 아직 설정되지 않았습니다. 관리자에게 문의해주세요.' });
     }
 
-    currentUser = await getCurrentUser(req.user.id);
+    const currentUser = await getCurrentUser(req.user.id);
     if (!currentUser) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     }
 
-    rawMessage = String(req.body.message || '').trim();
+    const rawMessage = String(req.body.message || '').trim();
     if (!rawMessage) return res.status(400).json({ error: '질문을 입력해주세요.' });
     if (rawMessage.length > CHATBOT_MAX_MESSAGE_LENGTH) {
       return res.status(400).json({ error: `질문은 ${CHATBOT_MAX_MESSAGE_LENGTH}자 이하로 입력해주세요.` });
@@ -2116,30 +2125,28 @@ app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
 
     const history = normalizeChatHistory(req.body.history);
     const chatbotContext = await buildChatbotContext(currentUser);
-    const response = await gemini.chat.completions.create({
-      model: GEMINI_CHAT_MODEL,
-      messages: [
-        {
-          role: 'system',
-          content: [
-            '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다.',
-            '항상 한국어로 답하고, 짧고 실용적으로 설명한다.',
-            '학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.',
-            '아래 컨텍스트에는 사용자의 학년/반과 과제 요약만 포함되어 있다.',
-            '사용자 이름, 작성자 이름, 다른 학생 정보, 공지 원문 같은 민감한 정보는 모른다고 전제한다.',
-            '과제 본문은 요약본만 전달되므로 세부 지시가 더 필요하면 사용자에게 해당 부분만 직접 보내달라고 안내한다.',
-            '제공된 과제 요약 범위를 넘는 정보는 추측하지 않는다.',
-            '',
-            chatbotContext
-          ].join('\n')
-        },
-        ...history,
-        {
-          role: 'user',
-          content: rawMessage
-        }
-      ]
-    });
+    const messages = [
+      {
+        role: 'system',
+        content: [
+          '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다.',
+          '항상 한국어로 답하고, 짧고 실용적으로 설명한다.',
+          '학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.',
+          '아래 컨텍스트에는 사용자의 학년/반과 과제 요약만 포함되어 있다.',
+          '사용자 이름, 작성자 이름, 다른 학생 정보, 공지 원문 같은 민감한 정보는 모른다고 전제한다.',
+          '과제 본문은 요약본만 전달되므로 세부 지시가 더 필요하면 사용자에게 해당 부분만 직접 보내달라고 안내한다.',
+          '제공된 과제 요약 범위를 넘는 정보는 추측하지 않는다.',
+          '',
+          chatbotContext
+        ].join('\n')
+      },
+      ...history,
+      {
+        role: 'user',
+        content: rawMessage
+      }
+    ];
+    const response = await requestChatbotCompletion(messages);
 
     const reply = String(response.choices?.[0]?.message?.content || '').trim();
     if (!reply) {
@@ -2152,9 +2159,18 @@ app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
     });
   } catch (error) {
     logApiError('POST /api/chatbot failed', error, { userId: req.user?.id });
+    if (error?.status === 401 || error?.status === 403) {
+      return res.status(502).json({ success: false, error: 'AI 챗봇 설정에 문제가 있습니다. 관리자에게 문의해주세요.' });
+    }
+    if (error?.status === 429) {
+      return res.status(503).json({ success: false, error: 'AI 요청이 많아 잠시 응답이 어렵습니다. 잠시 후 다시 시도해주세요.' });
+    }
+    if (isChatbotTransientError(error)) {
+      return res.status(503).json({ success: false, error: 'AI 서버 연결이 잠시 불안정합니다. 잠시 후 다시 시도해주세요.' });
+    }
     res.json({
-      success: true,
-      reply: buildChatbotFallbackReply(currentUser, rawMessage)
+      success: false,
+      error: '챗봇 응답을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'
     });
   }
 });
