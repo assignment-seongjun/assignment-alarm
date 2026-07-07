@@ -833,6 +833,78 @@ async function migrateSchema(conn) {
   await ensureIndex(conn, 'user_assignments', 'user_assignments_assignment_user_idx', '(assignment_id, user_id, is_completed)');
 }
 
+async function cleanupOrphanedRecords(conn) {
+  const [[orphanUserAssignmentsByUser]] = await conn.execute(
+    `SELECT COUNT(*) AS total
+       FROM user_assignments ua
+       LEFT JOIN users u ON ua.user_id = u.user_id
+      WHERE u.user_id IS NULL`
+  );
+  if (Number(orphanUserAssignmentsByUser.total) > 0) {
+    await conn.execute(
+      `DELETE ua
+         FROM user_assignments ua
+         LEFT JOIN users u ON ua.user_id = u.user_id
+        WHERE u.user_id IS NULL`
+    );
+  }
+
+  const [[orphanUserAssignmentsByAssignment]] = await conn.execute(
+    `SELECT COUNT(*) AS total
+       FROM user_assignments ua
+       LEFT JOIN assignments a ON ua.assignment_id = a.assignment_id
+      WHERE a.assignment_id IS NULL`
+  );
+  if (Number(orphanUserAssignmentsByAssignment.total) > 0) {
+    await conn.execute(
+      `DELETE ua
+         FROM user_assignments ua
+         LEFT JOIN assignments a ON ua.assignment_id = a.assignment_id
+        WHERE a.assignment_id IS NULL`
+    );
+  }
+
+  const [[orphanAssignments]] = await conn.execute(
+    `SELECT COUNT(*) AS total
+       FROM assignments a
+       LEFT JOIN users u ON a.created_by = u.user_id
+      WHERE u.user_id IS NULL`
+  );
+  if (Number(orphanAssignments.total) > 0) {
+    await conn.execute(
+      `DELETE a
+         FROM assignments a
+         LEFT JOIN users u ON a.created_by = u.user_id
+        WHERE u.user_id IS NULL`
+    );
+  }
+
+  const [[orphanMessages]] = await conn.execute(
+    `SELECT COUNT(*) AS total
+       FROM messages m
+       LEFT JOIN users u ON m.sender_id = u.user_id
+      WHERE u.user_id IS NULL`
+  );
+  if (Number(orphanMessages.total) > 0) {
+    await conn.execute(
+      `DELETE m
+         FROM messages m
+         LEFT JOIN users u ON m.sender_id = u.user_id
+        WHERE u.user_id IS NULL`
+    );
+  }
+
+  const summary = [
+    Number(orphanUserAssignmentsByUser.total) || 0,
+    Number(orphanUserAssignmentsByAssignment.total) || 0,
+    Number(orphanAssignments.total) || 0,
+    Number(orphanMessages.total) || 0
+  ];
+  if (summary.some((count) => count > 0)) {
+    console.log(`Cleaned orphaned records: user_assignments(user)=${summary[0]}, user_assignments(assignment)=${summary[1]}, assignments=${summary[2]}, messages=${summary[3]}`);
+  }
+}
+
 async function seedAdminAccount(conn) {
   if (ADMIN_EXCLUDED_GOOGLE_EMAILS.length > 0) {
     const excludedPlaceholders = ADMIN_EXCLUDED_GOOGLE_EMAILS.map(() => '?').join(', ');
@@ -1899,12 +1971,13 @@ async function init() {
       await fs.mkdir(ASSIGNMENT_IMAGE_DIR, { recursive: true });
       const conn = await pool.getConnection();
       await conn.ping();
-      for (const statement of bootstrapSchema) {
-        await conn.execute(statement);
-      }
-      await migrateSchema(conn);
-      await seedAdminAccount(conn);
-      conn.release();
+        for (const statement of bootstrapSchema) {
+          await conn.execute(statement);
+        }
+        await migrateSchema(conn);
+        await cleanupOrphanedRecords(conn);
+        await seedAdminAccount(conn);
+        conn.release();
       console.log(`MySQL connected: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
       app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
       return;
