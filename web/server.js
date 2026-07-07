@@ -407,6 +407,14 @@ function getNotificationCacheKey(user) {
   });
 }
 
+function toSqlLimit(value, fallback) {
+  const numeric = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(numeric) || numeric < 0) {
+    return fallback;
+  }
+  return numeric;
+}
+
 function buildChatbotFallbackReply(user, rawMessage = '') {
   const message = String(rawMessage || '').trim();
   const scope = user?.grade && user?.class_number
@@ -1384,6 +1392,8 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
     const adminUser = await ensureAdminAccess(req, res);
     if (!adminUser) return;
     const { page, pageSize, offset } = parsePagination(req.query);
+    const safePageSize = toSqlLimit(pageSize, ADMIN_PAGE_SIZE_DEFAULT);
+    const safeOffset = toSqlLimit(offset, 0);
     const cacheKey = JSON.stringify({ page, pageSize, scope: 'admin-users' });
     const cached = getCachedResponse(adminUserCache, cacheKey);
     if (cached) {
@@ -1391,8 +1401,10 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
     }
     const [[countRow]] = await pool.execute('SELECT COUNT(*) AS total FROM users');
     const [rows] = await pool.execute(
-      'SELECT user_id, name, grade, class_number, is_alarm_enabled, is_admin, created_at FROM users ORDER BY is_admin DESC, grade ASC, class_number ASC, name ASC LIMIT ? OFFSET ?',
-      [pageSize, offset]
+      `SELECT user_id, name, grade, class_number, is_alarm_enabled, is_admin, created_at
+         FROM users
+        ORDER BY is_admin DESC, grade ASC, class_number ASC, name ASC
+        LIMIT ${safePageSize} OFFSET ${safeOffset}`
     );
     const payload = {
       items: rows,
@@ -1418,6 +1430,8 @@ app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
     if (!adminUser) return;
 
     const { page, pageSize, offset } = parsePagination(req.query);
+    const safePageSize = toSqlLimit(pageSize, ADMIN_PAGE_SIZE_DEFAULT);
+    const safeOffset = toSqlLimit(offset, 0);
     const grade = req.query.grade && req.query.grade !== 'all' ? parseInteger(req.query.grade) : null;
     const classNumber = req.query.class_number && req.query.class_number !== 'all' ? parseInteger(req.query.class_number) : null;
 
@@ -1455,8 +1469,8 @@ app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
            FROM assignments a
            LEFT JOIN users u ON a.created_by = u.user_id${whereSql}
           ORDER BY a.due_date ASC, a.target_grade ASC, a.target_class ASC, a.created_at DESC
-          LIMIT ? OFFSET ?`,
-        params.concat([pageSize, offset])
+          LIMIT ${safePageSize} OFFSET ${safeOffset}`,
+        params
       );
 
     const payload = {
@@ -1483,6 +1497,8 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
     if (!adminUser) return;
 
     const { page, pageSize, offset } = parsePagination(req.query);
+    const safePageSize = toSqlLimit(pageSize, ADMIN_PAGE_SIZE_DEFAULT);
+    const safeOffset = toSqlLimit(offset, 0);
     const type = req.query.type ? String(req.query.type) : null;
     const grade = req.query.grade && req.query.grade !== 'all' ? parseInteger(req.query.grade) : null;
     const classNumber = req.query.class_number && req.query.class_number !== 'all' ? parseInteger(req.query.class_number) : null;
@@ -1528,8 +1544,8 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
            FROM messages m
            LEFT JOIN users u ON m.sender_id = u.user_id${whereSql}
           ORDER BY m.created_at DESC
-          LIMIT ? OFFSET ?`,
-        params.concat([pageSize, offset])
+          LIMIT ${safePageSize} OFFSET ${safeOffset}`,
+        params
       );
 
     const payload = {
@@ -1982,11 +1998,9 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
       messageParams = [currentUser.grade, 'grade', 'class', currentUser.class_number];
     }
 
-    assignmentSql += ' ORDER BY a.created_at DESC LIMIT ?';
-    assignmentParams.push(limit);
+    assignmentSql += ` ORDER BY a.created_at DESC LIMIT ${limit}`;
 
-    messageSql += ' ORDER BY m.created_at DESC LIMIT ?';
-    messageParams.push(limit);
+    messageSql += ` ORDER BY m.created_at DESC LIMIT ${limit}`;
 
     const [assignmentResult, messageResult] = await Promise.all([
       pool.execute(assignmentSql, assignmentParams).catch((error) => {
