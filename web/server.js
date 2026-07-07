@@ -73,6 +73,10 @@ const authAttempts = new Map();
 const chatbotAttempts = new Map();
 const assignmentImageAttempts = new Map();
 const assignmentWriteAttempts = new Map();
+const adminAssignmentCache = new Map();
+const adminMessageCache = new Map();
+const notificationCache = new Map();
+const RESPONSE_CACHE_TTL_MS = 15 * 1000;
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const gemini = GEMINI_API_KEY
   ? new OpenAI({ apiKey: GEMINI_API_KEY, baseURL: GEMINI_BASE_URL })
@@ -331,6 +335,104 @@ function parsePagination(query = {}) {
     pageSize,
     offset: (page - 1) * pageSize
   };
+}
+
+function getCachedResponse(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > RESPONSE_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCachedResponse(cache, key, value) {
+  cache.set(key, {
+    value,
+    cachedAt: Date.now()
+  });
+  return value;
+}
+
+function clearResponseCaches({ assignments = false, messages = false, notifications = false } = {}) {
+  if (assignments) {
+    adminAssignmentCache.clear();
+  }
+  if (messages) {
+    adminMessageCache.clear();
+  }
+  if (notifications) {
+    notificationCache.clear();
+  }
+}
+
+function logApiError(label, error, metadata = null) {
+  if (metadata) {
+    console.error(`[API] ${label}`, metadata, error);
+    return;
+  }
+  console.error(`[API] ${label}`, error);
+}
+
+function getAdminAssignmentCacheKey({ page, pageSize, grade, classNumber }) {
+  return JSON.stringify({
+    page,
+    pageSize,
+    grade: grade ?? 'all',
+    classNumber: classNumber ?? 'all'
+  });
+}
+
+function getAdminMessageCacheKey({ page, pageSize, type, grade, classNumber }) {
+  return JSON.stringify({
+    page,
+    pageSize,
+    type: type ?? 'all',
+    grade: grade ?? 'all',
+    classNumber: classNumber ?? 'all'
+  });
+}
+
+function getNotificationCacheKey(user) {
+  return JSON.stringify({
+    userId: user.user_id,
+    isAdmin: isAdminUser(user),
+    grade: user.grade ?? null,
+    classNumber: user.class_number ?? null
+  });
+}
+
+function buildChatbotFallbackReply(user, rawMessage = '') {
+  const message = String(rawMessage || '').trim();
+  const scope = user?.grade && user?.class_number
+    ? `${user.grade}학년 ${user.class_number}반`
+    : '현재 소속';
+
+  if (message.includes('계획') || message.includes('공부')) {
+    return [
+      '지금 AI 응답이 잠시 불안정해서 먼저 짧게 정리해드릴게요.',
+      `1. ${scope} 기준으로 오늘 마감 과제부터 확인하기`,
+      '2. 오래 걸리는 과제는 25분씩 나눠서 시작하기',
+      '3. 완료한 과제는 바로 제출 체크해서 남은 과제만 보이게 하기'
+    ].join('\n');
+  }
+
+  if (message.includes('과제') || message.includes('숙제') || message.includes('마감')) {
+    return [
+      '지금 AI 서버 응답이 잠시 늦어서 간단히 먼저 도와드릴게요.',
+      '과제는 보통 이렇게 처리하면 제일 덜 밀립니다.',
+      '1. 마감일이 빠른 순서대로 정리',
+      '2. 설명이 긴 과제는 핵심 해야 할 일만 따로 메모',
+      '3. 제출 직후 완료 체크'
+    ].join('\n');
+  }
+
+  return [
+    '지금 AI 응답이 잠시 불안정합니다.',
+    `${scope} 기준으로 캘린더와 공지를 먼저 확인하고,`,
+    '질문을 조금 더 짧게 다시 보내면 바로 이어서 도와드릴게요.'
+  ].join('\n');
 }
 
 function normalizeBooleanFlag(value) {
@@ -1298,6 +1400,12 @@ app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
     }
 
+    const cacheKey = getAdminAssignmentCacheKey({ page, pageSize, grade, classNumber });
+    const cached = getCachedResponse(adminAssignmentCache, cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const conditions = [];
     const params = [];
     if (grade !== null) {
@@ -1323,14 +1431,21 @@ app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
         params.concat([pageSize, offset])
       );
 
-    res.json({
+    const payload = {
       items: rows,
       total: Number(countRow.total) || 0,
       page,
       pageSize
+    };
+    res.json(setCachedResponse(adminAssignmentCache, cacheKey, payload));
+  } catch (error) {
+    logApiError('GET /api/admin/assignments failed', error, { query: req.query, userId: req.user?.id });
+    res.json({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: ADMIN_PAGE_SIZE_DEFAULT
     });
-  } catch {
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -1352,6 +1467,12 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
     }
     if (classNumber !== null && (classNumber < 1 || classNumber > MAX_CLASS)) {
       return res.status(400).json({ error: '반 값이 올바르지 않습니다.' });
+    }
+
+    const cacheKey = getAdminMessageCacheKey({ page, pageSize, type, grade, classNumber });
+    const cached = getCachedResponse(adminMessageCache, cacheKey);
+    if (cached) {
+      return res.json(cached);
     }
 
     const conditions = [];
@@ -1383,14 +1504,21 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
         params.concat([pageSize, offset])
       );
 
-    res.json({
+    const payload = {
       items: rows,
       total: Number(countRow.total) || 0,
       page,
       pageSize
+    };
+    res.json(setCachedResponse(adminMessageCache, cacheKey, payload));
+  } catch (error) {
+    logApiError('GET /api/admin/messages failed', error, { query: req.query, userId: req.user?.id });
+    res.json({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: ADMIN_PAGE_SIZE_DEFAULT
     });
-  } catch {
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -1473,8 +1601,10 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
         connection.release();
       }
 
+      clearResponseCaches({ assignments: true, messages: true, notifications: true });
       res.json({ success: true });
-    } catch {
+    } catch (error) {
+      logApiError('DELETE /api/admin/users/:id failed', error, { targetUserId: req.params.id, actorUserId: req.user?.id });
       res.status(500).json({ error: '서버 오류가 발생했습니다.' });
     }
   });
@@ -1558,6 +1688,7 @@ app.post('/api/assignments', authMiddleware, assignmentWriteRateLimit, async (re
       await pool.execute('INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)', [s.user_id, assignmentId]);
     }
 
+    clearResponseCaches({ assignments: true, notifications: true });
     res.json({ assignment_id: assignmentId, success: true });
   } catch (e) {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -1634,8 +1765,10 @@ app.put('/api/assignments/:id', authMiddleware, assignmentWriteRateLimit, async 
       }
     }
 
+    clearResponseCaches({ assignments: true, notifications: true });
     res.json({ success: true });
-  } catch {
+  } catch (error) {
+    logApiError('PUT /api/assignments/:id failed', error, { assignmentId: req.params.id, actorUserId: req.user?.id });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1685,8 +1818,10 @@ app.delete('/api/assignments/:id', authMiddleware, assignmentWriteRateLimit, asy
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     if (rows[0].created_by !== req.user.id && !isAdminUser(user)) return res.status(403).json({ error: '권한이 없습니다.' });
     await pool.execute('DELETE FROM assignments WHERE assignment_id = ?', [req.params.id]);
+    clearResponseCaches({ assignments: true, notifications: true });
     res.json({ success: true });
-  } catch {
+  } catch (error) {
+    logApiError('DELETE /api/assignments/:id failed', error, { assignmentId: req.params.id, actorUserId: req.user?.id });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1776,7 +1911,8 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
     sql += ' ORDER BY m.created_at DESC';
     const [rows] = await pool.execute(sql, params);
     res.json(rows);
-  } catch {
+  } catch (error) {
+    logApiError('GET /api/messages failed', error, { query: req.query, userId: req.user?.id });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1787,6 +1923,12 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     const currentUser = await getCurrentUser(req.user.id);
     if (!currentUser) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+
+    const cacheKey = getNotificationCacheKey(currentUser);
+    const cached = getCachedResponse(notificationCache, cacheKey);
+    if (cached) {
+      return res.json(cached);
     }
 
     let assignmentSql = `
@@ -1817,10 +1959,18 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     messageSql += ' ORDER BY m.created_at DESC LIMIT ?';
     messageParams.push(limit);
 
-    const [[assignmentRows], [messageRows]] = await Promise.all([
-      pool.execute(assignmentSql, assignmentParams),
-      pool.execute(messageSql, messageParams)
+    const [assignmentResult, messageResult] = await Promise.all([
+      pool.execute(assignmentSql, assignmentParams).catch((error) => {
+        logApiError('GET /api/notifications assignments query failed', error, { userId: currentUser.user_id });
+        return [[]];
+      }),
+      pool.execute(messageSql, messageParams).catch((error) => {
+        logApiError('GET /api/notifications messages query failed', error, { userId: currentUser.user_id });
+        return [[]];
+      })
     ]);
+    const assignmentRows = Array.isArray(assignmentResult?.[0]) ? assignmentResult[0] : [];
+    const messageRows = Array.isArray(messageResult?.[0]) ? messageResult[0] : [];
 
     const items = [
       ...assignmentRows.map((assignment) => ({
@@ -1846,9 +1996,10 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       .slice(0, limit);
 
-    res.json(items);
-  } catch {
-    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    res.json(setCachedResponse(notificationCache, cacheKey, items));
+  } catch (error) {
+    logApiError('GET /api/notifications failed', error, { userId: req.user?.id });
+    res.json([]);
   }
 });
 
@@ -1874,8 +2025,10 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
 
     const [result] = await pool.execute('INSERT INTO messages (sender_id, content, type, target_grade, target_class) VALUES (?, ?, ?, ?, ?)', [req.user.id, content, type, target_grade, target_class || null]);
 
+    clearResponseCaches({ messages: true, notifications: true });
     res.json({ message_id: result.insertId, success: true });
-  } catch {
+  } catch (error) {
+    logApiError('POST /api/messages failed', error, { actorUserId: req.user?.id, body: req.body });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
@@ -1888,24 +2041,31 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     if (rows[0].sender_id !== req.user.id && !isAdminUser(user)) return res.status(403).json({ error: '권한이 없습니다.' });
     await pool.execute('DELETE FROM messages WHERE message_id = ?', [req.params.id]);
+    clearResponseCaches({ messages: true, notifications: true });
     res.json({ success: true });
-  } catch {
+  } catch (error) {
+    logApiError('DELETE /api/messages/:id failed', error, { messageId: req.params.id, actorUserId: req.user?.id });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
 app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
+  let currentUser = null;
+  let rawMessage = '';
   try {
     if (!gemini) {
-      return res.status(503).json({ error: '챗봇이 아직 설정되지 않았습니다. 잠시 후 다시 시도해주세요.' });
+      return res.json({
+        success: true,
+        reply: buildChatbotFallbackReply(null, '')
+      });
     }
 
-    const currentUser = await getCurrentUser(req.user.id);
+    currentUser = await getCurrentUser(req.user.id);
     if (!currentUser) {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     }
 
-    const rawMessage = String(req.body.message || '').trim();
+    rawMessage = String(req.body.message || '').trim();
     if (!rawMessage) return res.status(400).json({ error: '질문을 입력해주세요.' });
     if (rawMessage.length > CHATBOT_MAX_MESSAGE_LENGTH) {
       return res.status(400).json({ error: `질문은 ${CHATBOT_MAX_MESSAGE_LENGTH}자 이하로 입력해주세요.` });
@@ -1948,14 +2108,11 @@ app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
       reply
     });
   } catch (error) {
-    console.error('Chatbot request failed:', error);
-    if (error?.status === 401 || error?.status === 403) {
-      return res.status(502).json({ error: '챗봇 설정에 문제가 있습니다. 관리자에게 문의해주세요.' });
-    }
-    if (error?.status === 429) {
-      return res.status(503).json({ error: '요청이 많아 잠시 응답이 어렵습니다. 잠시 후 다시 시도해주세요.' });
-    }
-    res.status(500).json({ error: '챗봇 응답을 가져오지 못했습니다.' });
+    logApiError('POST /api/chatbot failed', error, { userId: req.user?.id });
+    res.json({
+      success: true,
+      reply: buildChatbotFallbackReply(currentUser, rawMessage)
+    });
   }
 });
 
