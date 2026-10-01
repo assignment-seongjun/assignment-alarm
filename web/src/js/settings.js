@@ -1,5 +1,6 @@
 API.initTheme();
     API.requireAuth();
+    const adminLoadVersions = { assignment: 0, message: 0, user: 0 };
 
       const adminSettingsState = {
         pageSize: 10,
@@ -85,12 +86,13 @@ API.initTheme();
         image.alt = `${data.name} 프로필 이미지`;
         avatar.appendChild(image);
       } else {
-        avatar.textContent = data.name.charAt(0);
+        avatar.textContent = String(data.name || '?').charAt(0);
       }
 
       const toggle = document.getElementById('alarmToggle');
-      if (data.is_alarm_enabled) toggle.classList.add('on');
-      else toggle.classList.remove('on');
+      const alarmEnabled = API.normalizeFlag(data.is_alarm_enabled);
+      toggle.classList.toggle('on', alarmEnabled);
+      toggle.setAttribute('aria-checked', String(alarmEnabled));
 
       const themeModeSelect = document.getElementById('themeModeSelect');
       themeModeSelect.value = API.getTheme();
@@ -101,7 +103,7 @@ API.initTheme();
         user.name = data.name;
         user.grade = data.grade;
         user.class_number = data.class_number;
-        user.is_admin = Boolean(data.is_admin);
+        user.is_admin = API.normalizeFlag(data.is_admin);
         API.setUser(user);
       }
     }
@@ -277,14 +279,16 @@ API.initTheme();
     }
 
       async function loadAdminAssignments() {
+        const version = ++adminLoadVersions.assignment;
         const res = await API.getAdminAssignments({
           page: adminSettingsState.assignmentPage,
         pageSize: adminSettingsState.pageSize,
         grade: adminSettingsState.assignmentGrade,
         class_number: adminSettingsState.assignmentClass
       });
+      if (version !== adminLoadVersions.assignment) return;
       if (!Array.isArray(res?.items)) {
-        document.getElementById('adminAssignmentList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '과제 목록을 불러오지 못했습니다.')}</div>`;
+        document.getElementById('adminAssignmentList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '과제 목록을 불러오지 못했습니다.')}<br><button class="btn btn-secondary btn-sm" type="button" data-retry-admin="assignment">다시 시도</button></div>`;
         document.getElementById('adminAssignmentPager').innerHTML = '';
         return;
       }
@@ -312,7 +316,7 @@ API.initTheme();
 
       adminSettingsState.assignmentStatusOpen[assignmentId] = true;
 
-      if (!adminSettingsState.assignmentStatusById[assignmentId]) {
+      if (!adminSettingsState.assignmentStatusById[assignmentId] || adminSettingsState.assignmentStatusById[assignmentId].error) {
         adminSettingsState.assignmentStatusLoading[assignmentId] = true;
         renderAdminAssignments();
 
@@ -332,6 +336,7 @@ API.initTheme();
     }
 
       async function loadAdminMessages() {
+        const version = ++adminLoadVersions.message;
         const res = await API.getAdminMessages({
         page: adminSettingsState.messagePage,
         pageSize: adminSettingsState.pageSize,
@@ -339,8 +344,9 @@ API.initTheme();
         grade: adminSettingsState.messageGrade,
         class_number: adminSettingsState.messageType === 'class' ? adminSettingsState.messageClass : null
       });
+      if (version !== adminLoadVersions.message) return;
       if (!Array.isArray(res?.items)) {
-        document.getElementById('adminMessageList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '메세지 목록을 불러오지 못했습니다.')}</div>`;
+        document.getElementById('adminMessageList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '메세지 목록을 불러오지 못했습니다.')}<br><button class="btn btn-secondary btn-sm" type="button" data-retry-admin="message">다시 시도</button></div>`;
         document.getElementById('adminMessagePager').innerHTML = '';
         return;
       }
@@ -373,15 +379,15 @@ API.initTheme();
           <div class="admin-user-grid">
               <div class="form-group">
                 <label>이름</label>
-                <input type="text" class="admin-name-input" value="${API.escapeHTML(user.name)}" disabled>
+                <input aria-label="사용자 이름" type="text" class="admin-name-input" value="${API.escapeHTML(user.name)}" disabled>
               </div>
             <div class="form-group">
               <label>학년</label>
-              <select class="admin-grade-select">${adminUserOptions(3, '학년', user.grade)}</select>
+              <select aria-label="사용자 학년" class="admin-grade-select">${adminUserOptions(3, '학년', user.grade)}</select>
             </div>
             <div class="form-group">
               <label>반</label>
-              <select class="admin-class-select">${adminUserOptions(4, '반', user.class_number)}</select>
+              <select aria-label="사용자 반" class="admin-class-select">${adminUserOptions(4, '반', user.class_number)}</select>
             </div>
           </div>
           <div class="admin-user-meta">생성일 ${new Date(user.created_at).toLocaleString('ko-KR')}</div>
@@ -394,12 +400,14 @@ API.initTheme();
     }
 
       async function loadAdminUsers() {
+        const version = ++adminLoadVersions.user;
         const res = await API.getAdminUsers({
         page: adminSettingsState.userPage,
         pageSize: adminSettingsState.pageSize
       });
+      if (version !== adminLoadVersions.user) return;
       if (!Array.isArray(res?.items)) {
-        document.getElementById('adminUserList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '유저 목록을 불러오지 못했습니다.')}</div>`;
+        document.getElementById('adminUserList').innerHTML = `<div class="empty-state">${API.escapeHTML(res?.error || '유저 목록을 불러오지 못했습니다.')}<br><button class="btn btn-secondary btn-sm" type="button" data-retry-admin="user">다시 시도</button></div>`;
         document.getElementById('adminUserPager').innerHTML = '';
         return;
       }
@@ -416,10 +424,21 @@ API.initTheme();
         renderPagination('adminUserPager', 'user', adminSettingsState.userPage, adminSettingsState.userTotal, adminSettingsState.pageSize);
       }
 
-      document.getElementById('alarmToggle').addEventListener('click', async function() {
-        const newVal = !this.classList.contains('on');
-        this.classList.toggle('on');
-        await API.updateUser(API.getUser().id, { is_alarm_enabled: newVal ? 1 : 0 });
+    document.getElementById('alarmToggle').addEventListener('click', async function() {
+      if (this.disabled) return;
+      const user = API.getUser();
+      if (!user) return;
+      const newValue = !this.classList.contains('on');
+      this.disabled = true;
+      try {
+        const result = await API.updateUser(user.id, { is_alarm_enabled: newValue ? 1 : 0 });
+        if (!result?.success) throw new Error(result?.error || '알림 설정을 저장하지 못했습니다.');
+        this.classList.toggle('on', newValue);
+        this.setAttribute('aria-checked', String(newValue));
+        API.setUser({ ...user, is_alarm_enabled: newValue });
+        AppUI.toast(newValue ? '과제 알림을 켰습니다.' : '과제 알림을 껐습니다.');
+      } catch (error) { AppUI.toast(error.message || '설정 저장에 실패했습니다.', true); }
+      finally { this.disabled = false; }
     });
 
     function updateThemeHelpText(theme, resolvedTheme) {
@@ -521,6 +540,7 @@ API.initTheme();
           const panel = document.getElementById(button.dataset.target);
           const isOpen = button.classList.toggle('open');
           panel.classList.toggle('show', isOpen);
+          button.setAttribute('aria-expanded', String(isOpen));
           if (!isOpen) return;
 
           if (button.dataset.target === 'adminAssignmentPanel') {
@@ -577,6 +597,8 @@ API.initTheme();
     });
 
     document.addEventListener('click', async (e) => {
+      const retry = e.target.closest('[data-retry-admin]');
+      if (retry) { await ensureAdminSectionLoaded(retry.dataset.retryAdmin, { force: true }); return; }
       const pageButton = e.target.closest('.admin-page-btn');
       if (!pageButton || pageButton.disabled) return;
 
@@ -599,4 +621,4 @@ API.initTheme();
       }
     });
 
-    init();
+    init().catch(() => AppUI.toast('설정을 불러오지 못했습니다. 새로고침해주세요.', true));

@@ -13,16 +13,26 @@ const API = {
   notificationRequest: null,
   notificationCache: null,
   notificationCacheTtlMs: 20 * 1000,
+  storageGet(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+  storageSet(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  },
+  storageRemove(key) {
+    try { localStorage.removeItem(key); } catch {}
+  },
+  normalizeFlag(value) { return value === true || value === 1 || value === '1'; },
   getToken() { return null; },
   setToken() {
-    localStorage.removeItem('token');
+    this.storageRemove('token');
   },
   clearToken() {
-    localStorage.removeItem('token');
+    this.storageRemove('token');
   },
   getUser() {
     try {
-      return this.normalizeUser(this.currentUser || JSON.parse(localStorage.getItem('user') || 'null'));
+      return this.normalizeUser(this.currentUser || JSON.parse(this.storageGet('user') || 'null'));
     } catch {
       return null;
     }
@@ -31,7 +41,7 @@ const API = {
     const prevUser = this.getUser();
     const user = this.normalizeUser(u);
     this.currentUser = user;
-    localStorage.setItem('user', JSON.stringify(user));
+    this.storageSet('user', JSON.stringify(user));
     this.setCurrentUserFetchedAt();
     if (!prevUser || String(prevUser.id) !== String(user?.id)) {
       this.clearNotificationCache();
@@ -40,8 +50,8 @@ const API = {
   clearUser() {
     const hadUser = Boolean(this.getUser());
     this.currentUser = null;
-    localStorage.removeItem('user');
-    localStorage.removeItem(this.currentUserFetchedAtKey);
+    this.storageRemove('user');
+    this.storageRemove(this.currentUserFetchedAtKey);
     if (hadUser) {
       this.clearNotificationCache();
     }
@@ -49,7 +59,7 @@ const API = {
 
   getCurrentUserFetchedAt() {
     try {
-      const value = Number.parseInt(localStorage.getItem(this.currentUserFetchedAtKey) || '0', 10);
+      const value = Number.parseInt(this.storageGet(this.currentUserFetchedAtKey) || '0', 10);
       return Number.isFinite(value) ? value : 0;
     } catch {
       return 0;
@@ -58,13 +68,13 @@ const API = {
 
   setCurrentUserFetchedAt(value = Date.now()) {
     try {
-      localStorage.setItem(this.currentUserFetchedAtKey, String(value));
+      this.storageSet(this.currentUserFetchedAtKey, String(value));
     } catch {}
   },
 
   getTheme() {
     try {
-      const savedTheme = localStorage.getItem(this.themeStorageKey);
+      const savedTheme = this.storageGet(this.themeStorageKey);
       return this.themeOptions.includes(savedTheme) ? savedTheme : 'system';
     } catch {
       return 'system';
@@ -102,7 +112,7 @@ const API = {
   setTheme(theme) {
     const nextTheme = this.themeOptions.includes(theme) ? theme : 'system';
     try {
-      localStorage.setItem(this.themeStorageKey, nextTheme);
+      this.storageSet(this.themeStorageKey, nextTheme);
     } catch {}
     this.applyTheme(nextTheme);
     return nextTheme;
@@ -224,26 +234,38 @@ const API = {
   },
 
   async request(method, url, body) {
-    const headers = { 'Content-Type': 'application/json' };
-    const res = await fetch(url, {
-      method,
-      headers,
-      credentials: 'same-origin',
-      body: body ? JSON.stringify(body) : undefined
-    });
-    const isAuthRequest = url === '/api/auth/login' || url === '/api/auth/register' || url === '/api/auth/google' || url === '/api/auth/google/register';
-    if (res.status === 401) {
-      if (isAuthRequest) {
-        return res.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        signal: controller.signal,
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+      let data;
+      try { data = await res.json(); } catch {
+        return { success: false, status: res.status, error: '서버가 응답하지 않습니다. 잠시 후 다시 시도해주세요.' };
       }
-      this.clearToken();
-      this.clearUser();
-      if (!this.isLoginPage()) {
-        window.location.href = 'login.html';
+      const isAuthRequest = ['/api/auth/login', '/api/auth/register', '/api/auth/google', '/api/auth/google/register'].includes(url);
+      if (res.status === 401 && !isAuthRequest) {
+        this.clearToken();
+        this.clearUser();
+        if (!this.isLoginPage()) window.location.href = 'login.html';
+        return { success: false, status: 401, error: '인증이 만료되었습니다.' };
       }
-      return { error: '인증이 만료되었습니다.' };
+      if (!res.ok) {
+        return { success: false, status: res.status, error: data?.error || '요청을 처리하지 못했습니다. 다시 시도해주세요.' };
+      }
+      return data;
+    } catch (error) {
+      return { success: false, error: error?.name === 'AbortError'
+        ? '응답 시간이 초과되었습니다. 다시 시도해주세요.'
+        : '서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 다시 시도해주세요.' };
+    } finally {
+      clearTimeout(timeout);
     }
-    return res.json();
   },
 
   get(url) { return this.request('GET', url); },
@@ -260,7 +282,7 @@ const API = {
 
   getCachedPublicConfig() {
     try {
-      const cached = JSON.parse(localStorage.getItem(this.publicConfigCacheKey) || 'null');
+      const cached = JSON.parse(this.storageGet(this.publicConfigCacheKey) || 'null');
       if (!cached || typeof cached !== 'object') return null;
       if (!cached.fetchedAt || Date.now() - Number(cached.fetchedAt) > this.publicConfigCacheTtlMs) return null;
       return cached.value || null;
@@ -271,7 +293,7 @@ const API = {
 
   setCachedPublicConfig(value) {
     try {
-      localStorage.setItem(this.publicConfigCacheKey, JSON.stringify({
+      this.storageSet(this.publicConfigCacheKey, JSON.stringify({
         value,
         fetchedAt: Date.now()
       }));
@@ -310,8 +332,8 @@ const API = {
       grade: u.grade,
       class_number: u.class_number,
       profile_image_url: u.profile_image_url || null,
-      is_alarm_enabled: u.is_alarm_enabled,
-      is_admin: Boolean(u.is_admin)
+      is_alarm_enabled: this.normalizeFlag(u.is_alarm_enabled),
+      is_admin: this.normalizeFlag(u.is_admin)
     };
   },
 
@@ -329,6 +351,7 @@ const API = {
 
     this.currentUserRequest = this.me()
       .then((serverUser) => {
+        if (serverUser?.error && serverUser.status !== 401) throw new Error(serverUser.error);
         const user = this.normalizeUser(serverUser);
         if (user && user.id && user.grade && user.class_number) {
           this.setUser(user);
@@ -384,7 +407,8 @@ const API = {
   },
   sendMessage(data) { return this.post('/api/messages', data); },
   deleteMessage(id) { return this.del(`/api/messages/${id}`); },
-  sendChatMessage(message, history = []) { return this.post('/api/chatbot', { message, history }); },
+  // AI 챗봇은 현재 비활성화되어 있습니다. 복구 시 서버 구현과 함께 검토하세요.
+  // sendChatMessage(message, history = []) { return this.post('/api/chatbot', { message, history }); },
 
   getUserById(id) { return this.get(`/api/users/${id}`); },
   updateUser(id, data) { return this.put(`/api/users/${id}`, data); },
@@ -418,7 +442,8 @@ const API = {
 
     const promise = this.get('/api/notifications')
       .then((items) => {
-        const normalized = Array.isArray(items) ? items : [];
+        if (!Array.isArray(items)) return items;
+        const normalized = items;
         this.notificationCache = {
           userId,
           items: normalized,
@@ -441,15 +466,25 @@ const API = {
   },
 
   getNotificationSeenAt(userId) {
-    return localStorage.getItem(this.getNotificationSeenKey(userId)) || '1970-01-01T00:00:00.000Z';
+    return this.storageGet(this.getNotificationSeenKey(userId)) || '1970-01-01T00:00:00.000Z';
   },
 
   setNotificationSeenAt(userId, seenAt) {
-    localStorage.setItem(this.getNotificationSeenKey(userId), seenAt);
+    this.storageSet(this.getNotificationSeenKey(userId), seenAt);
+  },
+
+  safeInternalLink(value) {
+    try {
+      const url = new URL(String(value || ''), window.location.origin + '/');
+      if (url.origin !== window.location.origin || !['/calendar.html', '/register.html', '/messages.html', '/settings.html'].includes(url.pathname)) return '';
+      return url.pathname + url.search + url.hash;
+    } catch { return ''; }
   },
 
   formatNotificationTime(value) {
-    return new Date(value).toLocaleString('ko-KR', {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    return date.toLocaleString('ko-KR', {
       month: 'numeric',
       day: 'numeric',
       hour: '2-digit',
@@ -517,6 +552,10 @@ const API = {
         }
 
         const items = await this.getNotifications({ force });
+        if (!Array.isArray(items)) {
+          list.innerHTML = `<div class="notification-empty" role="status">${this.escapeHTML(items?.error || '알림을 불러오지 못했습니다.')}</div>`;
+          return;
+        }
         latestRenderedNotificationAt = items.reduce((latest, item) => {
           return getTimestamp(item.created_at) > getTimestamp(latest) ? item.created_at : latest;
         }, null);
@@ -539,7 +578,7 @@ const API = {
       }
 
       list.innerHTML = items.map(item => `
-        <button type="button" class="notification-item" data-link="${item.link}">
+        <button type="button" class="notification-item" data-link="${this.escapeHTML(this.safeInternalLink(item.link))}">
           <div class="notification-item-header">
             <span class="notification-item-title">${this.escapeHTML(item.title)}</span>
             <span class="notification-item-time">${this.formatNotificationTime(item.created_at)}</span>
@@ -570,6 +609,7 @@ const API = {
     button.addEventListener('click', async (e) => {
       e.stopPropagation();
         const isOpen = panel.classList.toggle('show');
+        button.setAttribute('aria-expanded', String(isOpen));
         if (isOpen) {
           positionPanel();
           await render();
@@ -588,12 +628,23 @@ const API = {
       const item = e.target.closest('.notification-item');
       if (!item) return;
       panel.classList.remove('show');
-      window.location.href = item.dataset.link;
+      button.setAttribute('aria-expanded', 'false');
+      const link = this.safeInternalLink(item.dataset.link);
+      if (link) window.location.href = link;
     });
 
     document.addEventListener('click', (e) => {
       if (!panel.contains(e.target) && !button.contains(e.target)) {
         panel.classList.remove('show');
+        button.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && panel.classList.contains('show')) {
+        panel.classList.remove('show');
+        button.setAttribute('aria-expanded', 'false');
+        button.focus();
       }
     });
 
@@ -611,7 +662,11 @@ const API = {
 
   async refreshNotifications() {},
   async logout() {
-    await this.logoutRequest();
+    const result = await this.logoutRequest();
+    if (!result?.success) {
+      alert(result?.error || '로그아웃하지 못했습니다. 다시 시도해주세요.');
+      return;
+    }
     this.clearToken();
     this.clearUser();
     window.location.href = 'login.html';

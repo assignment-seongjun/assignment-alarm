@@ -3,23 +3,26 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
-const OpenAI = require('openai');
+// AI 챗봇 보관: 현재 SDK를 로드하거나 외부 AI API를 호출하지 않습니다.
+// const OpenAI = require('openai');
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 
 const app = express();
-const PORT = Number(process.env.PORT) || 80;
+const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const TRUST_PROXY = parseTrustProxySetting(process.env.TRUST_PROXY);
+const APP_ORIGIN = process.env.APP_ORIGIN ? new URL(process.env.APP_ORIGIN).origin : null;
 const JWT_SECRET = process.env.JWT_SECRET || (!IS_PRODUCTION ? crypto.randomBytes(32).toString('hex') : null);
 const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || null;
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || null;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
-const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash';
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
+// const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash';
+// const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 const GOOGLE_ALLOWED_DOMAIN = 'bssm.hs.kr';
 const ADMIN_GOOGLE_EMAILS = Array.from(new Set(
   String(
@@ -58,23 +61,25 @@ const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT = 20;
 const AUTH_RATE_MAX_TRACKED_CLIENTS = Math.max(Number.parseInt(process.env.AUTH_RATE_MAX_TRACKED_CLIENTS || '5000', 10) || 5000, 1000);
-const CHATBOT_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.CHATBOT_RATE_WINDOW_MS || '300000', 10) || 300000, 60000);
-const CHATBOT_RATE_LIMIT = Math.max(Number.parseInt(process.env.CHATBOT_RATE_LIMIT || '20', 10) || 20, 1);
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// const CHATBOT_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.CHATBOT_RATE_WINDOW_MS || '300000', 10) || 300000, 60000);
+// const CHATBOT_RATE_LIMIT = Math.max(Number.parseInt(process.env.CHATBOT_RATE_LIMIT || '20', 10) || 20, 1);
 const ASSIGNMENT_IMAGE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASSIGNMENT_IMAGE_RATE_WINDOW_MS || '600000', 10) || 600000, 60000);
 const ASSIGNMENT_IMAGE_RATE_LIMIT = Math.max(Number.parseInt(process.env.ASSIGNMENT_IMAGE_RATE_LIMIT || '10', 10) || 10, 1);
 const ASSIGNMENT_WRITE_RATE_WINDOW_MS = Math.max(Number.parseInt(process.env.ASSIGNMENT_WRITE_RATE_WINDOW_MS || '600000', 10) || 600000, 60000);
 const ASSIGNMENT_WRITE_RATE_LIMIT = Math.max(Number.parseInt(process.env.ASSIGNMENT_WRITE_RATE_LIMIT || '20', 10) || 20, 1);
-const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
-const CHATBOT_MAX_HISTORY_ITEMS = 10;
-const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 8;
-const CHATBOT_CONTEXT_CONTENT_LENGTH = 120;
-const CHATBOT_CONTEXT_TITLE_LENGTH = 60;
-const CHATBOT_RETRY_COUNT = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_COUNT || '2', 10) || 2, 0);
-const CHATBOT_RETRY_DELAY_MS = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_DELAY_MS || '1500', 10) || 1500, 0);
-const CHATBOT_RESPONSE_CACHE_TTL_MS = Math.max(Number.parseInt(process.env.CHATBOT_RESPONSE_CACHE_TTL_MS || '45000', 10) || 45000, 5000);
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
+// const CHATBOT_MAX_HISTORY_ITEMS = 10;
+// const CHATBOT_CONTEXT_ASSIGNMENT_LIMIT = 8;
+// const CHATBOT_CONTEXT_CONTENT_LENGTH = 120;
+// const CHATBOT_CONTEXT_TITLE_LENGTH = 60;
+// const CHATBOT_RETRY_COUNT = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_COUNT || '2', 10) || 2, 0);
+// const CHATBOT_RETRY_DELAY_MS = Math.max(Number.parseInt(process.env.CHATBOT_RETRY_DELAY_MS || '1500', 10) || 1500, 0);
+// const CHATBOT_RESPONSE_CACHE_TTL_MS = Math.max(Number.parseInt(process.env.CHATBOT_RESPONSE_CACHE_TTL_MS || '45000', 10) || 45000, 5000);
 const authAttempts = new Map();
-const chatbotAttempts = new Map();
-const chatbotResponseCache = new Map();
+// const chatbotAttempts = new Map();
+// const chatbotResponseCache = new Map();
 const assignmentImageAttempts = new Map();
 const assignmentWriteAttempts = new Map();
 const adminUserCache = new Map();
@@ -83,10 +88,16 @@ const adminMessageCache = new Map();
 const notificationCache = new Map();
 const RESPONSE_CACHE_TTL_MS = 15 * 1000;
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
-const gemini = GEMINI_API_KEY
-  ? new OpenAI({ apiKey: GEMINI_API_KEY, baseURL: GEMINI_BASE_URL })
-  : null;
-const ASSIGNMENT_IMAGE_DIR = path.join(__dirname, 'src', 'uploads', 'assignment-images');
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// const gemini = GEMINI_API_KEY
+//   ? new OpenAI({ apiKey: GEMINI_API_KEY, baseURL: GEMINI_BASE_URL })
+//   : null;
+const ASSIGNMENT_IMAGE_DIR = process.env.ASSIGNMENT_IMAGE_DIR
+  ? path.resolve(process.env.ASSIGNMENT_IMAGE_DIR)
+  : path.join(__dirname, 'src', 'uploads', 'assignment-images');
+const ASSIGNMENT_IMAGES_ENABLED = process.env.ENABLE_ASSIGNMENT_IMAGE_UPLOADS !== 'false';
+const ASSIGNMENT_IMAGE_MAX_STORAGE_BYTES = Math.max(Number(process.env.ASSIGNMENT_IMAGE_MAX_STORAGE_MB) || 512, 1) * 1024 * 1024;
+let pendingImageWrite = Promise.resolve();
 const ASSIGNMENT_IMAGE_PUBLIC_PATH = '/uploads/assignment-images';
 const ASSIGNMENT_IMAGE_EXTENSIONS = new Map([
   ['image/png', '.png'],
@@ -104,11 +115,12 @@ const dbConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   charset: 'utf8mb4',
-  dateStrings: true
+  dateStrings: true,
+  ...(process.env.DB_SSL === 'true' ? { ssl: { rejectUnauthorized: true, ...(process.env.DB_SSL_CA ? { ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n') } : {}) } } : {})
 };
 
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET environment variable is required in production.');
+if (!JWT_SECRET || (IS_PRODUCTION && Buffer.byteLength(JWT_SECRET) < 32)) {
+  throw new Error('JWT_SECRET must contain at least 32 bytes in production.');
 }
 
 if (!dbConfig.user || !dbConfig.password) {
@@ -120,7 +132,7 @@ const pool = mysql.createPool(dbConfig);
 function parseTrustProxySetting(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized || normalized === 'false' || normalized === '0') return false;
-  if (normalized === 'true') return true;
+  if (normalized === 'true') throw new Error('Set TRUST_PROXY to a known proxy hop count or trusted subnet instead of true.');
   const numeric = Number.parseInt(normalized, 10);
   if (Number.isInteger(numeric) && String(numeric) === normalized) return numeric;
   return normalized;
@@ -130,14 +142,14 @@ function buildContentSecurityPolicy() {
   return [
     "default-src 'self'",
     "base-uri 'self'",
-    "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://generativelanguage.googleapis.com",
+    "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://challenges.cloudflare.com",
     "font-src 'self' data: https:",
     "form-action 'self' https://accounts.google.com",
     "frame-ancestors 'none'",
-    "frame-src 'self' https://accounts.google.com",
+    "frame-src 'self' https://accounts.google.com https://challenges.cloudflare.com",
     "img-src 'self' data: blob: https:",
     "object-src 'none'",
-    "script-src 'self' https://accounts.google.com",
+    "script-src 'self' https://accounts.google.com https://challenges.cloudflare.com",
     "style-src 'self' 'unsafe-inline'"
   ].join('; ');
 }
@@ -146,7 +158,7 @@ const bootstrapSchema = [
   `CREATE TABLE IF NOT EXISTS users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
     password VARCHAR(255) NOT NULL,
-    name VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
     google_sub VARCHAR(255) DEFAULT NULL,
     google_email VARCHAR(255) DEFAULT NULL,
     grade INT NOT NULL,
@@ -212,8 +224,79 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: '8mb' }));
-app.use(express.urlencoded({ extended: true, limit: '16kb' }));
+// Disabled AI routes are handled before parsers/static files, including direct URLs.
+app.all('/api/chatbot', (_req, res) => {
+  res.status(410).json({ success: false, error: 'AI 챗봇은 현재 비활성화되어 있습니다.' });
+});
+app.use((req, res, next) => {
+  let requestPath;
+  try { requestPath = path.posix.normalize(decodeURIComponent(req.path)).toLowerCase(); } catch { return res.status(400).end(); }
+  if (requestPath === '/chatbot.html' || requestPath === '/js/chatbot.js') {
+    return res.status(410).type('text/plain').send('AI 챗봇은 현재 비활성화되어 있습니다.');
+  }
+  // Encoded/traversal aliases must not bypass upload authorization via static files.
+  if (requestPath.startsWith('/uploads/') && requestPath !== req.path.toLowerCase()) return res.status(404).end();
+  next();
+});
+
+// Cookie authentication requires same-origin writes, including login/logout.
+app.use('/api', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const fetchSite = req.get('Sec-Fetch-Site');
+  if (fetchSite && !['same-origin', 'none'].includes(fetchSite)) {
+    return res.status(403).json({ error: '다른 사이트에서 보낸 요청은 허용하지 않습니다.' });
+  }
+  const origin = req.get('Origin');
+  if (origin) {
+    try {
+      const expectedOrigin = APP_ORIGIN || new URL(`${req.protocol}://${req.get('host')}`).origin;
+      if (new URL(origin).origin !== expectedOrigin) throw new Error('origin-mismatch');
+    } catch {
+      return res.status(403).json({ error: '다른 사이트에서 보낸 요청은 허용하지 않습니다.' });
+    }
+  }
+  next();
+});
+app.use('/api/uploads/assignment-image', express.json({ limit: '6mb' }));
+app.use(express.json({ limit: '32kb' }));
+app.use(express.urlencoded({ extended: false, limit: '16kb' }));
+app.use('/api', (req, res, next) => {
+  if (req.body !== undefined && (req.body === null || Array.isArray(req.body) || typeof req.body !== 'object')) {
+    return res.status(400).json({ error: '요청 형식이 올바르지 않습니다.' });
+  }
+  next();
+});
+for (const name of ['id', 'userId']) {
+  app.param(name, (req, res, next, value) => {
+    const id = parseInteger(value);
+    if (!id || id < 1 || id > 2147483647) return res.status(400).json({ error: '요청 정보가 올바르지 않습니다.' });
+    next();
+  });
+}
+
+// Assignment attachments are private and require visibility of the referenced assignment.
+app.get(`${ASSIGNMENT_IMAGE_PUBLIC_PATH}/:filename`, authMiddleware, async (req, res, next) => {
+  try {
+    const filename = req.params.filename;
+    if (!/^\d+(?:-\d+)?-[a-f0-9]{16,32}\.(png|jpg|webp|gif)$/.test(filename)) return res.status(404).end();
+    const user = req.currentUser;
+    const ownedByUser = filename.startsWith(`${user.user_id}-`) && /^\d+-\d+-/.test(filename);
+    if (!ownedByUser && !isAdminUser(user)) {
+      const [rows] = await pool.execute(
+        'SELECT assignment_id FROM assignments WHERE INSTR(BINARY content, BINARY ?) > 0 AND target_grade = ? AND (target_class = ? OR target_class IS NULL) LIMIT 1',
+        [`${ASSIGNMENT_IMAGE_PUBLIC_PATH}/${filename}`, user.grade, user.class_number]
+      );
+      if (!rows.length) return res.status(403).json({ error: '첨부 이미지를 볼 권한이 없습니다.' });
+    }
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.sendFile(filename, { root: ASSIGNMENT_IMAGE_DIR, cacheControl: false }, (error) => {
+      if (error) next(error);
+    });
+  } catch (error) { next(error); }
+});
+// Prevent an unmatched upload path from falling through to express.static.
+app.use('/uploads', (_req, res) => res.status(404).end());
+
 app.use(express.static(path.join(__dirname, 'src'), {
   etag: true,
   lastModified: true,
@@ -221,7 +304,7 @@ app.use(express.static(path.join(__dirname, 'src'), {
   setHeaders(res, filePath) {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.html') {
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-store');
       return;
     }
     if (!IS_PRODUCTION) {
@@ -235,14 +318,18 @@ app.use(express.static(path.join(__dirname, 'src'), {
 }));
 
 function parseCookies(req) {
-  const header = req.headers.cookie;
-  if (!header) return {};
-  return header.split(';').reduce((acc, part) => {
-    const [rawKey, ...rawValue] = part.trim().split('=');
-    if (!rawKey) return acc;
-    acc[rawKey] = decodeURIComponent(rawValue.join('='));
-    return acc;
-  }, {});
+  const cookies = Object.create(null);
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 1) continue;
+    const key = part.slice(0, separator).trim();
+    try {
+      cookies[key] = decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      // A malformed unrelated cookie must not crash an authenticated request.
+    }
+  }
+  return cookies;
 }
 
 function getRequestToken(req) {
@@ -277,9 +364,9 @@ function clearAuthCookie() {
 
 function createToken(user) {
   return jwt.sign(
-    { id: user.id || user.user_id, name: user.name, grade: user.grade, class_number: user.class_number, is_admin: normalizeBooleanFlag(user.is_admin) },
+    { type: 'session', id: user.id || user.user_id },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '7d', algorithm: 'HS256', issuer: 'assignment-alarm', audience: 'session' }
   );
 }
 
@@ -291,7 +378,7 @@ function createGoogleSetupToken(profile) {
   return jwt.sign(
     { type: 'google-setup', profile },
     JWT_SECRET,
-    { expiresIn: '10m' }
+    { expiresIn: '10m', algorithm: 'HS256', issuer: 'assignment-alarm', audience: 'google-setup' }
   );
 }
 
@@ -324,14 +411,16 @@ function truncateText(value, limit) {
 }
 
 function parseInteger(value) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) ? parsed : null;
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (!/^-?\d+$/.test(String(value))) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function parsePagination(query = {}) {
   const rawPage = parseInteger(query.page);
   const rawPageSize = parseInteger(query.pageSize);
-  const page = rawPage && rawPage > 0 ? rawPage : 1;
+  const page = rawPage && rawPage > 0 ? Math.min(rawPage, 1000000) : 1;
   const pageSize = rawPageSize && rawPageSize > 0
     ? Math.min(rawPageSize, ADMIN_PAGE_SIZE_MAX)
     : ADMIN_PAGE_SIZE_DEFAULT;
@@ -353,6 +442,10 @@ function getCachedResponse(cache, key) {
 }
 
 function setCachedResponse(cache, key, value) {
+  for (const [entryKey, entry] of cache) {
+    if (Date.now() - entry.cachedAt > RESPONSE_CACHE_TTL_MS) cache.delete(entryKey);
+  }
+  if (cache.size >= 500) cache.delete(cache.keys().next().value);
   cache.set(key, {
     value,
     cachedAt: Date.now()
@@ -376,11 +469,8 @@ function clearResponseCaches({ users = false, assignments = false, messages = fa
 }
 
 function logApiError(label, error, metadata = null) {
-  if (metadata) {
-    console.error(`[API] ${label}`, metadata, error);
-    return;
-  }
-  console.error(`[API] ${label}`, error);
+  // Provider/SQL error objects can include credentials, tokens, or submitted content.
+  console.error(`[API] ${label}`, { code: String(error?.code || error?.name || 'Error'), ...(metadata || {}) });
 }
 
 function getAdminAssignmentCacheKey({ page, pageSize, grade, classNumber }) {
@@ -419,94 +509,89 @@ function toSqlLimit(value, fallback) {
   return numeric;
 }
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getChatbotResponseCacheKey(userId, rawMessage, history) {
-  return JSON.stringify({
-    userId,
-    rawMessage: String(rawMessage || '').trim(),
-    history: Array.isArray(history)
-      ? history.map((item) => ({
-        role: item?.role,
-        content: String(item?.content || '').trim()
-      }))
-      : []
-  });
-}
-
-function getCachedChatbotResponse(cacheKey) {
-  const entry = chatbotResponseCache.get(cacheKey);
-  if (!entry) return null;
-  if (Date.now() - entry.cachedAt > CHATBOT_RESPONSE_CACHE_TTL_MS) {
-    chatbotResponseCache.delete(cacheKey);
-    return null;
-  }
-  return entry.reply;
-}
-
-function setCachedChatbotResponse(cacheKey, reply) {
-  chatbotResponseCache.set(cacheKey, {
-    reply,
-    cachedAt: Date.now()
-  });
-}
-
-function isChatbotTransientError(error) {
-  const status = Number(error?.status || error?.code || 0);
-  const code = String(error?.code || '').toUpperCase();
-  const message = String(error?.message || '').toLowerCase();
-
-  if ([408, 409, 425, 429].includes(status) || status >= 500) {
-    return true;
-  }
-
-  return [
-    'ETIMEDOUT',
-    'ECONNRESET',
-    'ECONNREFUSED',
-    'ECONNABORTED',
-    'EAI_AGAIN',
-    'ENOTFOUND'
-  ].includes(code) || message.includes('timeout') || message.includes('timed out');
-}
-
-async function requestChatbotCompletion(messages) {
-  let lastError = null;
-
-  for (let attempt = 0; attempt <= CHATBOT_RETRY_COUNT; attempt += 1) {
-    try {
-      return await gemini.chat.completions.create({
-        model: GEMINI_CHAT_MODEL,
-        messages
-      });
-    } catch (error) {
-      lastError = error;
-      if (!isChatbotTransientError(error) || attempt >= CHATBOT_RETRY_COUNT) {
-        throw error;
-      }
-      await wait(CHATBOT_RETRY_DELAY_MS * (attempt + 1));
-    }
-  }
-
-  throw lastError || new Error('chatbot-request-failed');
-}
-
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// function wait(ms) {
+//   return new Promise((resolve) => setTimeout(resolve, ms));
+// }
+//
+// function getChatbotResponseCacheKey(userId, rawMessage, history) {
+//   return JSON.stringify({
+//     userId,
+//     rawMessage: String(rawMessage || '').trim(),
+//     history: Array.isArray(history)
+//       ? history.map((item) => ({
+//         role: item?.role,
+//         content: String(item?.content || '').trim()
+//       }))
+//       : []
+//   });
+// }
+//
+// function getCachedChatbotResponse(cacheKey) {
+//   const entry = chatbotResponseCache.get(cacheKey);
+//   if (!entry) return null;
+//   if (Date.now() - entry.cachedAt > CHATBOT_RESPONSE_CACHE_TTL_MS) {
+//     chatbotResponseCache.delete(cacheKey);
+//     return null;
+//   }
+//   return entry.reply;
+// }
+//
+// function setCachedChatbotResponse(cacheKey, reply) {
+//   chatbotResponseCache.set(cacheKey, {
+//     reply,
+//     cachedAt: Date.now()
+//   });
+// }
+//
+// function isChatbotTransientError(error) {
+//   const status = Number(error?.status || error?.code || 0);
+//   const code = String(error?.code || '').toUpperCase();
+//   const message = String(error?.message || '').toLowerCase();
+//
+//   if ([408, 409, 425, 429].includes(status) || status >= 500) {
+//     return true;
+//   }
+//
+//   return [
+//     'ETIMEDOUT',
+//     'ECONNRESET',
+//     'ECONNREFUSED',
+//     'ECONNABORTED',
+//     'EAI_AGAIN',
+//     'ENOTFOUND'
+//   ].includes(code) || message.includes('timeout') || message.includes('timed out');
+// }
+//
+// async function requestChatbotCompletion(messages) {
+//   let lastError = null;
+//
+//   for (let attempt = 0; attempt <= CHATBOT_RETRY_COUNT; attempt += 1) {
+//     try {
+//       return await gemini.chat.completions.create({
+//         model: GEMINI_CHAT_MODEL,
+//         messages
+//       });
+//     } catch (error) {
+//       lastError = error;
+//       if (!isChatbotTransientError(error) || attempt >= CHATBOT_RETRY_COUNT) {
+//         throw error;
+//       }
+//       await wait(CHATBOT_RETRY_DELAY_MS * (attempt + 1));
+//     }
+//   }
+//
+//   throw lastError || new Error('chatbot-request-failed');
+// }
+//
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' ? 1 : 0;
-}
-
-function isTeacherAdminEmail(email) {
-  const normalized = String(email || '').trim().toLowerCase();
-  const [localPart = '', domain = ''] = normalized.split('@');
-  return domain === GOOGLE_ALLOWED_DOMAIN && localPart.includes('teacher');
 }
 
 function isAdminEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (ADMIN_EXCLUDED_GOOGLE_EMAILS.includes(normalized)) return false;
-  return ADMIN_GOOGLE_EMAILS.includes(normalized) || isTeacherAdminEmail(normalized);
+  return ADMIN_GOOGLE_EMAILS.includes(normalized);
 }
 
 function isAdminUser(user) {
@@ -514,102 +599,149 @@ function isAdminUser(user) {
 }
 
 function isValidDateOnly(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1) return false;
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function decodeAssignmentImageDataUrl(dataUrl) {
-  const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([a-z0-9+/=\s]+)$/i.exec(String(dataUrl || ''));
-  if (!match) {
-    throw new Error('assignment-image-invalid');
-  }
-
+  const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([a-z0-9+/]+={0,2})$/i.exec(String(dataUrl || ''));
+  if (!match || match[2].length % 4 !== 0) throw new Error('assignment-image-invalid');
   const mimeType = match[1].toLowerCase();
-  const extension = ASSIGNMENT_IMAGE_EXTENSIONS.get(mimeType);
-  if (!extension) {
-    throw new Error('assignment-image-type');
-  }
-
   const buffer = Buffer.from(match[2], 'base64');
-  if (!buffer.length) {
-    throw new Error('assignment-image-invalid');
-  }
-  if (buffer.length > MAX_ASSIGNMENT_IMAGE_BYTES) {
-    throw new Error('assignment-image-too-large');
-  }
+  if (!buffer.length || buffer.toString('base64') !== match[2]) throw new Error('assignment-image-invalid');
+  if (buffer.length > MAX_ASSIGNMENT_IMAGE_BYTES) throw new Error('assignment-image-too-large');
+  const isValidSignature = (
+    (mimeType === 'image/png' && buffer.length >= 24 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && buffer.toString('ascii', 12, 16) === 'IHDR') ||
+    (mimeType === 'image/jpeg' && buffer.length >= 4 && buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255 && buffer[buffer.length - 2] === 255 && buffer[buffer.length - 1] === 217) ||
+    (mimeType === 'image/gif' && buffer.length >= 13 && ['GIF87a', 'GIF89a'].includes(buffer.toString('ascii', 0, 6))) ||
+    (mimeType === 'image/webp' && buffer.length >= 16 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP' && buffer.readUInt32LE(4) + 8 === buffer.length)
+  );
+  if (!isValidSignature) throw new Error('assignment-image-invalid');
+  return { buffer, extension: ASSIGNMENT_IMAGE_EXTENSIONS.get(mimeType) };
+}
 
-  return { buffer, extension };
+// Serialize writes so parallel uploads cannot bypass the local storage cap.
+async function storeAssignmentImage(filename, buffer) {
+  const operation = pendingImageWrite.catch(() => {}).then(async () => {
+    await fs.mkdir(ASSIGNMENT_IMAGE_DIR, { recursive: true });
+    const entries = await fs.readdir(ASSIGNMENT_IMAGE_DIR, { withFileTypes: true });
+    let usedBytes = 0;
+    for (const entry of entries) {
+      if (entry.isFile()) usedBytes += (await fs.stat(path.join(ASSIGNMENT_IMAGE_DIR, entry.name))).size;
+    }
+    if (usedBytes + buffer.length > ASSIGNMENT_IMAGE_MAX_STORAGE_BYTES) throw new Error('assignment-image-storage-full');
+    await fs.writeFile(path.join(ASSIGNMENT_IMAGE_DIR, filename), buffer, { flag: 'wx' });
+  });
+  pendingImageWrite = operation;
+  await operation;
+}
+
+// A visible assignment must never become a way to claim a private attachment URL.
+async function validateAssignmentImageReferences(content, user) {
+  if (!content || isAdminUser(user)) return true;
+  const references = new Set(Array.from(String(content).matchAll(
+    /\/uploads\/assignment-images\/(\d+(?:-\d+)?-[a-f0-9]{16,32}\.(?:png|jpg|webp|gif))/gi
+  ), (match) => match[0]));
+  for (const imageUrl of references) {
+    const filename = imageUrl.slice(imageUrl.lastIndexOf('/') + 1);
+    if (filename.startsWith(`${user.user_id}-`) && /^\d+-\d+-/.test(filename)) continue;
+    const [rows] = await pool.execute(
+      'SELECT assignment_id FROM assignments WHERE INSTR(BINARY content, BINARY ?) > 0 AND target_grade = ? AND (target_class = ? OR target_class IS NULL) LIMIT 1',
+      [imageUrl, user.grade, user.class_number]
+    );
+    if (!rows.length) return false;
+  }
+  return true;
+}
+
+async function withTransaction(operation) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await operation(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 function getAssignmentContentErrorMessage() {
   return `과제 내용은 ${MAX_ASSIGNMENT_CONTENT_LENGTH}자 이하로 입력해주세요.`;
 }
 
-function truncateText(value, maxLength = CHATBOT_MAX_MESSAGE_LENGTH) {
-  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
-  if (!normalized) return '';
-  if (normalized.length <= maxLength) return normalized;
-  return normalized.slice(0, maxLength);
-}
-
-function normalizeChatHistory(rawHistory) {
-  if (!Array.isArray(rawHistory)) return [];
-  return rawHistory
-    .filter((item) => item && (item.role === 'user' || item.role === 'assistant'))
-    .map((item) => ({
-      role: item.role,
-      content: truncateText(item.content)
-    }))
-    .filter((item) => item.content)
-    .slice(-CHATBOT_MAX_HISTORY_ITEMS);
-}
-
-function summarizeChatbotContextText(value, maxLength) {
-  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
-  if (!normalized) return '';
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1).trim()}...`;
-}
-
-async function buildChatbotContext(user) {
-  const [rows] = await pool.execute(
-    `SELECT a.assignment_id, a.title, a.content, a.due_date, COALESCE(ua.is_completed, 0) AS is_completed
-       FROM assignments a
-       LEFT JOIN user_assignments ua
-         ON ua.assignment_id = a.assignment_id
-        AND ua.user_id = ?
-      WHERE a.target_grade = ?
-        AND (a.target_class = ? OR a.target_class IS NULL)
-      ORDER BY a.due_date ASC, a.created_at DESC
-      LIMIT ${CHATBOT_CONTEXT_ASSIGNMENT_LIMIT}`,
-    [user.user_id, user.grade, user.class_number]
-  );
-
-  const assignmentLines = rows.map((assignment) => {
-    const title = summarizeChatbotContextText(assignment.title, CHATBOT_CONTEXT_TITLE_LENGTH) || '제목 없음';
-    const contentSummary = summarizeChatbotContextText(assignment.content, CHATBOT_CONTEXT_CONTENT_LENGTH);
-    const statusLabel = normalizeBooleanFlag(assignment.is_completed) ? '완료' : '미완료';
-    const parts = [
-      `- ${title}`,
-      `마감 ${assignment.due_date || '미정'}`,
-      statusLabel
-    ];
-
-    if (contentSummary) {
-      parts.push(`내용 요약: ${contentSummary}`);
-    }
-
-    return parts.join(' / ');
-  });
-
-  return [
-    '[사용자 기본 정보]',
-    `- 소속: ${user.grade}학년 ${user.class_number}반`,
-    '',
-    '[현재 과제 요약]',
-    assignmentLines.length > 0 ? assignmentLines.join('\n') : '- 현재 확인된 과제가 없습니다.'
-  ].join('\n');
-}
-
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// function truncateText(value, maxLength = CHATBOT_MAX_MESSAGE_LENGTH) {
+//   const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+//   if (!normalized) return '';
+//   if (normalized.length <= maxLength) return normalized;
+//   return normalized.slice(0, maxLength);
+// }
+//
+// function normalizeChatHistory(rawHistory) {
+//   if (!Array.isArray(rawHistory)) return [];
+//   return rawHistory
+//     .filter((item) => item && (item.role === 'user' || item.role === 'assistant'))
+//     .map((item) => ({
+//       role: item.role,
+//       content: truncateText(item.content)
+//     }))
+//     .filter((item) => item.content)
+//     .slice(-CHATBOT_MAX_HISTORY_ITEMS);
+// }
+//
+// function summarizeChatbotContextText(value, maxLength) {
+//   const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+//   if (!normalized) return '';
+//   if (normalized.length <= maxLength) return normalized;
+//   return `${normalized.slice(0, maxLength - 1).trim()}...`;
+// }
+//
+// async function buildChatbotContext(user) {
+//   const [rows] = await pool.execute(
+//     `SELECT a.assignment_id, a.title, a.content, a.due_date, COALESCE(ua.is_completed, 0) AS is_completed
+//        FROM assignments a
+//        LEFT JOIN user_assignments ua
+//          ON ua.assignment_id = a.assignment_id
+//         AND ua.user_id = ?
+//       WHERE a.target_grade = ?
+//         AND (a.target_class = ? OR a.target_class IS NULL)
+//       ORDER BY a.due_date ASC, a.created_at DESC
+//       LIMIT ${CHATBOT_CONTEXT_ASSIGNMENT_LIMIT}`,
+//     [user.user_id, user.grade, user.class_number]
+//   );
+//
+//   const assignmentLines = rows.map((assignment) => {
+//     const title = summarizeChatbotContextText(assignment.title, CHATBOT_CONTEXT_TITLE_LENGTH) || '제목 없음';
+//     const contentSummary = summarizeChatbotContextText(assignment.content, CHATBOT_CONTEXT_CONTENT_LENGTH);
+//     const statusLabel = normalizeBooleanFlag(assignment.is_completed) ? '완료' : '미완료';
+//     const parts = [
+//       `- ${title}`,
+//       `마감 ${assignment.due_date || '미정'}`,
+//       statusLabel
+//     ];
+//
+//     if (contentSummary) {
+//       parts.push(`내용 요약: ${contentSummary}`);
+//     }
+//
+//     return parts.join(' / ');
+//   });
+//
+//   return [
+//     '[사용자 기본 정보]',
+//     `- 소속: ${user.grade}학년 ${user.class_number}반`,
+//     '',
+//     '[현재 과제 요약]',
+//     assignmentLines.length > 0 ? assignmentLines.join('\n') : '- 현재 확인된 과제가 없습니다.'
+//   ].join('\n');
+// }
+//
 async function verifyGoogleCredential(credential) {
   if (!googleClient || !GOOGLE_CLIENT_ID) {
     throw new Error('google-not-configured');
@@ -624,7 +756,7 @@ async function verifyGoogleCredential(credential) {
     throw new Error('google-invalid-token');
   }
   const email = String(payload.email || '').trim().toLowerCase();
-  if (!payload.email_verified || !email.endsWith(`@${GOOGLE_ALLOWED_DOMAIN}`)) {
+  if (payload.email_verified !== true || payload.hd !== GOOGLE_ALLOWED_DOMAIN || !email.endsWith(`@${GOOGLE_ALLOWED_DOMAIN}`)) {
     throw new Error('google-domain-not-allowed');
   }
 
@@ -640,59 +772,6 @@ async function findUserByGoogleSub(googleSub) {
   const [rows] = await pool.execute(
     'SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin, google_sub, google_email FROM users WHERE google_sub = ? LIMIT 1',
     [googleSub]
-  );
-  return rows[0] || null;
-}
-
-async function findLegacyUserForGoogleProfile(profile) {
-  const normalizedName = normalizeGoogleName(profile?.name);
-  if (!normalizedName) return null;
-  const [rows] = await pool.execute(
-    `SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin, google_sub, google_email
-       FROM users
-      WHERE google_sub IS NULL
-        AND name = ?
-      LIMIT 1`,
-    [normalizedName]
-  );
-  return rows[0] || null;
-}
-
-async function linkGoogleProfileToExistingUser(userId, profile, shouldGrantAdmin, overrides = {}) {
-  const nextGrade = parseInteger(overrides.grade);
-  const nextClassNumber = parseInteger(overrides.class_number);
-  const shouldUpdateGrade = Number.isInteger(nextGrade) && nextGrade >= 1 && nextGrade <= MAX_GRADE;
-  const shouldUpdateClass = Number.isInteger(nextClassNumber) && nextClassNumber >= 1 && nextClassNumber <= MAX_CLASS;
-
-  const updates = [
-    'google_sub = ?',
-    'google_email = ?',
-    'profile_image_url = COALESCE(?, profile_image_url)'
-  ];
-  const values = [
-    profile.google_sub,
-    profile.google_email,
-    profile.profile_image_url
-  ];
-
-  if (shouldGrantAdmin) {
-    updates.push('is_admin = 1');
-  }
-  if (shouldUpdateGrade) {
-    updates.push('grade = ?');
-    values.push(nextGrade);
-  }
-  if (shouldUpdateClass) {
-    updates.push('class_number = ?');
-    values.push(nextClassNumber);
-  }
-
-  values.push(userId);
-  await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`, values);
-
-  const [rows] = await pool.execute(
-    'SELECT user_id, name, grade, class_number, profile_image_url, is_alarm_enabled, is_admin, google_sub, google_email FROM users WHERE user_id = ? LIMIT 1',
-    [userId]
   );
   return rows[0] || null;
 }
@@ -749,26 +828,27 @@ function clearAuthRateLimit(req) {
   authAttempts.delete(key);
 }
 
-function chatbotRateLimit(req, res, next) {
-  const key = req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket.remoteAddress || 'unknown');
-  const result = consumeRateLimitAttempt(
-    chatbotAttempts,
-    key,
-    {
-      windowMs: CHATBOT_RATE_WINDOW_MS,
-      limit: CHATBOT_RATE_LIMIT,
-      maxTrackedClients: AUTH_RATE_MAX_TRACKED_CLIENTS
-    }
-  );
-
-  if (!result.allowed) {
-    res.setHeader('Retry-After', String(Math.ceil((result.retryAfterMs || CHATBOT_RATE_WINDOW_MS) / 1000)));
-    return res.status(429).json({ error: '챗봇 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' });
-  }
-
-  next();
-}
-
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// function chatbotRateLimit(req, res, next) {
+//   const key = req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket.remoteAddress || 'unknown');
+//   const result = consumeRateLimitAttempt(
+//     chatbotAttempts,
+//     key,
+//     {
+//       windowMs: CHATBOT_RATE_WINDOW_MS,
+//       limit: CHATBOT_RATE_LIMIT,
+//       maxTrackedClients: AUTH_RATE_MAX_TRACKED_CLIENTS
+//     }
+//   );
+//
+//   if (!result.allowed) {
+//     res.setHeader('Retry-After', String(Math.ceil((result.retryAfterMs || CHATBOT_RATE_WINDOW_MS) / 1000)));
+//     return res.status(429).json({ error: '챗봇 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' });
+//   }
+//
+//   next();
+// }
+//
 function assignmentImageRateLimit(req, res, next) {
   const key = req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket.remoteAddress || 'unknown');
   const result = consumeRateLimitAttempt(
@@ -809,15 +889,28 @@ function assignmentWriteRateLimit(req, res, next) {
   next();
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const token = getRequestToken(req);
   if (!token) return res.status(401).json({ error: '로그인이 필요합니다.' });
+  let decoded;
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
+    decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'], issuer: 'assignment-alarm', audience: 'session' });
+    if (decoded?.type !== 'session' || !Number.isSafeInteger(decoded.id) || decoded.id < 1) throw new Error('invalid-session');
   } catch {
     res.setHeader('Set-Cookie', clearAuthCookie());
-    return res.status(401).json({ error: '토큰이 만료되었습니다.' });
+    return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해주세요.' });
+  }
+  try {
+    req.currentUser = await getCurrentUser(decoded.id);
+    if (!req.currentUser) {
+      res.setHeader('Set-Cookie', clearAuthCookie());
+      return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해주세요.' });
+    }
+    req.user = decoded;
+    next();
+  } catch (error) {
+    logApiError('Session lookup failed', error);
+    res.status(503).json({ error: '서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.' });
   }
 }
 
@@ -857,7 +950,8 @@ async function verifyTurnstileToken(token, remoteIp) {
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     },
-    body: params
+    body: params,
+    signal: AbortSignal.timeout(10000)
   });
 
   if (!response.ok) {
@@ -884,31 +978,16 @@ async function ensureIndex(conn, tableName, indexName, definitionSql) {
 }
 
 async function migrateSchema(conn) {
+  // 기존 email 값은 복구에 필요하므로 보존하고 새 Google 가입은 NULL을 허용합니다.
   const [legacyEmailColumns] = await conn.execute(
-    `SELECT COLUMN_NAME
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'users'
-       AND COLUMN_NAME = 'email'`
+    `SELECT COLUMN_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'email'`
   );
-
-  if (legacyEmailColumns.length > 0) {
-    const [emailIndexes] = await conn.execute(
-      `SELECT INDEX_NAME
-       FROM INFORMATION_SCHEMA.STATISTICS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'users'
-         AND COLUMN_NAME = 'email'
-         AND INDEX_NAME <> 'PRIMARY'`
-    );
-
-    for (const index of emailIndexes) {
-      await conn.execute(`ALTER TABLE users DROP INDEX \`${index.INDEX_NAME}\``);
-    }
-
-    await conn.execute('ALTER TABLE users DROP COLUMN email');
+  const legacyEmail = legacyEmailColumns[0];
+  if (legacyEmail?.IS_NULLABLE === 'NO') {
+    if (!/^(?:(?:var)?char\(\d+\)|(?:tiny|medium|long)?text)$/i.test(legacyEmail.COLUMN_TYPE)) throw new Error('unsupported-legacy-email-column');
+    await conn.execute(`ALTER TABLE users MODIFY COLUMN email ${legacyEmail.COLUMN_TYPE} NULL DEFAULT NULL`);
   }
-
   const [googleSubColumns] = await conn.execute(
     `SELECT COLUMN_NAME
      FROM INFORMATION_SCHEMA.COLUMNS
@@ -943,8 +1022,9 @@ async function migrateSchema(conn) {
        AND INDEX_NAME <> 'PRIMARY'`
   );
 
-  if (nameUniqueIndexes.length === 0) {
-    await conn.execute('ALTER TABLE users ADD UNIQUE INDEX users_name_unique (name)');
+  // 동명이인은 정상입니다. 표시 이름을 계정 식별자나 연결 근거로 사용하지 않습니다.
+  for (const index of nameUniqueIndexes) {
+    await conn.execute(`ALTER TABLE users DROP INDEX \`${index.INDEX_NAME.replace(/`/g, '``')}\``);
   }
 
   const [googleSubUniqueIndexes] = await conn.execute(
@@ -985,17 +1065,7 @@ async function migrateSchema(conn) {
     await conn.execute('ALTER TABLE users ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER is_admin');
   }
 
-  const [assignmentAttachmentColumns] = await conn.execute(
-    `SELECT COLUMN_NAME
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'assignments'
-       AND COLUMN_NAME = 'attachment_url'`
-  );
-
-  if (assignmentAttachmentColumns.length > 0) {
-    await conn.execute('ALTER TABLE assignments DROP COLUMN attachment_url');
-  }
+  // 기존 attachment_url 컬럼도 과거 첨부 데이터 보존을 위해 남겨둡니다.
 
   await ensureIndex(conn, 'users', 'users_grade_class_idx', '(grade, class_number)');
   await ensureIndex(conn, 'assignments', 'assignments_scope_due_created_idx', '(target_grade, target_class, due_date, created_at)');
@@ -1086,17 +1156,8 @@ async function seedAdminAccount(conn) {
     );
   }
 
-  const [teacherRows] = await conn.execute(
-    'SELECT user_id, google_email FROM users WHERE google_email LIKE ?',
-    [`%teacher%@${GOOGLE_ALLOWED_DOMAIN}`]
-  );
-  for (const row of teacherRows) {
-    if (ADMIN_EXCLUDED_GOOGLE_EMAILS.includes(String(row.google_email || '').trim().toLowerCase())) {
-      continue;
-    }
-    await conn.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [row.user_id]);
-    console.log(`Admin account synced by teacher email rule: ${row.google_email}`);
-  }
+  // Google 관리자 권한은 검증된 이메일의 명시 허용 목록으로만 결정합니다.
+  await conn.execute('UPDATE users SET is_admin = 0 WHERE google_sub IS NOT NULL');
 
   if (ADMIN_GOOGLE_EMAILS.length > 0) {
     const targetAdminEmails = ADMIN_GOOGLE_EMAILS.filter(email => !ADMIN_EXCLUDED_GOOGLE_EMAILS.includes(email));
@@ -1122,7 +1183,7 @@ async function seedAdminAccount(conn) {
   const adminGrade = Number.isInteger(ADMIN_GRADE) && ADMIN_GRADE >= 1 && ADMIN_GRADE <= MAX_GRADE ? ADMIN_GRADE : 1;
   const adminClass = Number.isInteger(ADMIN_CLASS) && ADMIN_CLASS >= 1 && ADMIN_CLASS <= MAX_CLASS ? ADMIN_CLASS : 1;
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
-  const [rows] = await conn.execute('SELECT user_id FROM users WHERE name = ? LIMIT 1', [ADMIN_NAME]);
+  const [rows] = await conn.execute('SELECT user_id FROM users WHERE name = ? AND google_sub IS NULL AND is_admin = 1 LIMIT 1', [ADMIN_NAME]);
 
   if (rows.length === 0) {
     await conn.execute(
@@ -1141,11 +1202,21 @@ async function seedAdminAccount(conn) {
 }
 
 // Auth
+app.get('/api/health', async (_req, res) => {
+  try {
+    await pool.execute('SELECT 1');
+    res.json({ status: 'ok' });
+  } catch {
+    res.status(503).json({ status: 'unavailable' });
+  }
+});
+
 app.get('/api/public-config', (_req, res) => {
   res.json({
     turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : null,
     googleClientId: GOOGLE_CLIENT_ID || null,
-    chatbotEnabled: Boolean(GEMINI_API_KEY)
+    chatbotEnabled: false,
+    imagesEnabled: ASSIGNMENT_IMAGES_ENABLED
   });
 });
 
@@ -1168,9 +1239,7 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
 
     if (existingUser) {
       const shouldGrantAdmin = isAdminEmail(profile.google_email);
-      if (shouldGrantAdmin && !isAdminUser(existingUser)) {
-        await pool.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [existingUser.user_id]);
-      }
+      await pool.execute('UPDATE users SET is_admin = ? WHERE user_id = ?', [shouldGrantAdmin ? 1 : 0, existingUser.user_id]);
 
       await pool.execute(
         'UPDATE users SET google_email = ?, profile_image_url = COALESCE(?, profile_image_url) WHERE user_id = ?',
@@ -1182,7 +1251,7 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
         name: existingUser.name,
         grade: existingUser.grade,
         class_number: existingUser.class_number,
-        is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
+        is_admin: shouldGrantAdmin ? 1 : 0
       };
       setAuthCookie(res, createToken(user));
       clearAuthRateLimit(req);
@@ -1194,36 +1263,11 @@ app.post('/api/auth/google', authRateLimit, async (req, res) => {
           class_number: existingUser.class_number,
           profile_image_url: profile.profile_image_url || existingUser.profile_image_url,
           is_alarm_enabled: existingUser.is_alarm_enabled,
-          is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
+          is_admin: shouldGrantAdmin ? 1 : 0
         }
       });
     }
 
-    const legacyUser = await findLegacyUserForGoogleProfile(profile);
-    if (legacyUser) {
-      const shouldGrantAdmin = isAdminEmail(profile.google_email);
-      const linkedUser = await linkGoogleProfileToExistingUser(legacyUser.user_id, profile, shouldGrantAdmin);
-      const user = {
-        id: linkedUser.user_id,
-        name: linkedUser.name,
-        grade: linkedUser.grade,
-        class_number: linkedUser.class_number,
-        is_admin: linkedUser.is_admin
-      };
-      setAuthCookie(res, createToken(user));
-      clearAuthRateLimit(req);
-      return res.json({
-        user: {
-          id: linkedUser.user_id,
-          name: linkedUser.name,
-          grade: linkedUser.grade,
-          class_number: linkedUser.class_number,
-          profile_image_url: linkedUser.profile_image_url,
-          is_alarm_enabled: linkedUser.is_alarm_enabled,
-          is_admin: linkedUser.is_admin
-        }
-      });
-    }
 
     return res.json({
       requiresProfile: true,
@@ -1259,7 +1303,7 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(setupToken, JWT_SECRET);
+      decoded = jwt.verify(setupToken, JWT_SECRET, { algorithms: ['HS256'], issuer: 'assignment-alarm', audience: 'google-setup' });
     } catch {
       return res.status(401).json({ error: '구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.' });
     }
@@ -1271,15 +1315,13 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
     const existingUser = await findUserByGoogleSub(decoded.profile.google_sub);
     if (existingUser) {
       const shouldGrantAdmin = isAdminEmail(decoded.profile.google_email);
-      if (shouldGrantAdmin && !isAdminUser(existingUser)) {
-        await pool.execute('UPDATE users SET is_admin = 1 WHERE user_id = ?', [existingUser.user_id]);
-      }
+      await pool.execute('UPDATE users SET is_admin = ? WHERE user_id = ?', [shouldGrantAdmin ? 1 : 0, existingUser.user_id]);
       const user = {
         id: existingUser.user_id,
         name: existingUser.name,
         grade: existingUser.grade,
         class_number: existingUser.class_number,
-        is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
+        is_admin: shouldGrantAdmin ? 1 : 0
       };
       setAuthCookie(res, createToken(user));
       clearAuthRateLimit(req);
@@ -1291,41 +1333,11 @@ app.post('/api/auth/google/register', authRateLimit, async (req, res) => {
           class_number: existingUser.class_number,
           profile_image_url: existingUser.profile_image_url,
           is_alarm_enabled: existingUser.is_alarm_enabled,
-          is_admin: shouldGrantAdmin ? 1 : existingUser.is_admin
+          is_admin: shouldGrantAdmin ? 1 : 0
         }
       });
     }
 
-    const legacyUser = await findLegacyUserForGoogleProfile(decoded.profile);
-    if (legacyUser) {
-      const shouldGrantAdmin = isAdminEmail(decoded.profile.google_email);
-      const linkedUser = await linkGoogleProfileToExistingUser(
-        legacyUser.user_id,
-        decoded.profile,
-        shouldGrantAdmin,
-        { grade, class_number }
-      );
-      const user = {
-        id: linkedUser.user_id,
-        name: linkedUser.name,
-        grade: linkedUser.grade,
-        class_number: linkedUser.class_number,
-        is_admin: linkedUser.is_admin
-      };
-      setAuthCookie(res, createToken(user));
-      clearAuthRateLimit(req);
-      return res.json({
-        user: {
-          id: linkedUser.user_id,
-          name: linkedUser.name,
-          grade: linkedUser.grade,
-          class_number: linkedUser.class_number,
-          profile_image_url: linkedUser.profile_image_url,
-          is_alarm_enabled: linkedUser.is_alarm_enabled,
-          is_admin: linkedUser.is_admin
-        }
-      });
-    }
 
     const uniqueName = normalizeGoogleName(decoded.profile.name);
     const isAdmin = isAdminEmail(decoded.profile.google_email) ? 1 : 0;
@@ -1372,6 +1384,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.post('/api/uploads/assignment-image', authMiddleware, assignmentImageRateLimit, async (req, res) => {
+  if (!ASSIGNMENT_IMAGES_ENABLED) return res.status(503).json({ error: '현재 배포 환경에서는 이미지 업로드를 사용할 수 없습니다. 과제 내용을 텍스트로 입력해주세요.' });
   try {
     const imageDataUrl = String(req.body.image_data_url || '');
     if (!imageDataUrl) {
@@ -1395,15 +1408,16 @@ app.post('/api/uploads/assignment-image', authMiddleware, assignmentImageRateLim
       return res.status(400).json({ error: message });
     }
 
-    const filename = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${decoded.extension}`;
-    await fs.writeFile(path.join(ASSIGNMENT_IMAGE_DIR, filename), decoded.buffer);
+    const filename = `${user.user_id}-${Date.now()}-${crypto.randomBytes(16).toString('hex')}${decoded.extension}`;
+    await storeAssignmentImage(filename, decoded.buffer);
 
     res.json({
       success: true,
       url: `${ASSIGNMENT_IMAGE_PUBLIC_PATH}/${filename}`,
       markdown: `![첨부 이미지](${ASSIGNMENT_IMAGE_PUBLIC_PATH}/${filename})`
     });
-  } catch {
+  } catch (error) {
+    if (error?.message === 'assignment-image-storage-full') return res.status(507).json({ error: '이미지 저장 공간이 부족합니다. 관리자에게 문의하거나 과제를 텍스트로 입력해주세요.' });
     res.status(500).json({ error: '이미지 업로드에 실패했습니다.' });
   }
 });
@@ -1460,13 +1474,8 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
     };
     res.json(setCachedResponse(adminUserCache, cacheKey, payload));
   } catch (error) {
-    logApiError('GET /api/admin/users failed', error, { query: req.query, userId: req.user?.id });
-    res.json({
-      items: [],
-      total: 0,
-      page: 1,
-      pageSize: ADMIN_PAGE_SIZE_DEFAULT
-    });
+    logApiError('GET /api/admin/users failed', error, { userId: req.user?.id });
+    res.status(503).json({ error: '목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 
@@ -1527,13 +1536,8 @@ app.get('/api/admin/assignments', authMiddleware, async (req, res) => {
     };
     res.json(setCachedResponse(adminAssignmentCache, cacheKey, payload));
   } catch (error) {
-    logApiError('GET /api/admin/assignments failed', error, { query: req.query, userId: req.user?.id });
-    res.json({
-      items: [],
-      total: 0,
-      page: 1,
-      pageSize: ADMIN_PAGE_SIZE_DEFAULT
-    });
+    logApiError('GET /api/admin/assignments failed', error, { userId: req.user?.id });
+    res.status(503).json({ error: '목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 
@@ -1602,13 +1606,8 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
     };
     res.json(setCachedResponse(adminMessageCache, cacheKey, payload));
   } catch (error) {
-    logApiError('GET /api/admin/messages failed', error, { query: req.query, userId: req.user?.id });
-    res.json({
-      items: [],
-      total: 0,
-      page: 1,
-      pageSize: ADMIN_PAGE_SIZE_DEFAULT
-    });
+    logApiError('GET /api/admin/messages failed', error, { userId: req.user?.id });
+    res.status(503).json({ error: '목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 
@@ -1639,6 +1638,7 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
     }
 
     if (req.body.is_alarm_enabled !== undefined) {
+      if (![true, false, 0, 1, '0', '1'].includes(req.body.is_alarm_enabled)) return res.status(400).json({ error: '알림 설정이 올바르지 않습니다.' });
       req.body.is_alarm_enabled = normalizeBooleanFlag(req.body.is_alarm_enabled);
     }
 
@@ -1707,6 +1707,7 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: '이름은 변경할 수 없습니다.' });
       }
       if (req.body.is_alarm_enabled !== undefined) {
+        if (![true, false, 0, 1, '0', '1'].includes(req.body.is_alarm_enabled)) return res.status(400).json({ error: '알림 설정이 올바르지 않습니다.' });
         req.body.is_alarm_enabled = normalizeBooleanFlag(req.body.is_alarm_enabled);
       }
       const allowed = ['is_alarm_enabled'];
@@ -1759,6 +1760,7 @@ app.post('/api/assignments', authMiddleware, assignmentWriteRateLimit, async (re
     if (!isValidDateOnly(due_date)) return res.status(400).json({ error: '마감일 형식이 올바르지 않습니다.' });
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (!await validateAssignmentImageReferences(content, user)) return res.status(403).json({ error: '사용할 수 없는 첨부 이미지가 포함되어 있습니다.' });
     let target_grade = user.grade;
     let target_class = user.class_number;
 
@@ -1769,15 +1771,17 @@ app.post('/api/assignments', authMiddleware, assignmentWriteRateLimit, async (re
       if (!target_class || target_class < 1 || target_class > MAX_CLASS) return res.status(400).json({ error: '대상 반이 올바르지 않습니다.' });
     }
 
-    const [result] = await pool.execute(
-      'INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      [title, content || null, due_date, target_grade, target_class || null, req.user.id]
-    );
-    const assignmentId = result.insertId;
-    const [students] = await pool.execute('SELECT user_id FROM users WHERE grade = ? AND class_number = ?', [target_grade, target_class]);
-    for (const s of students) {
-      await pool.execute('INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)', [s.user_id, assignmentId]);
-    }
+    const assignmentId = await withTransaction(async (connection) => {
+      const [result] = await connection.execute(
+        'INSERT INTO assignments (title, content, due_date, target_grade, target_class, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+        [title, content || null, due_date, target_grade, target_class || null, req.user.id]
+      );
+      await connection.execute(
+        'INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) SELECT user_id, ?, 0 FROM users WHERE grade = ? AND (? IS NULL OR class_number = ?)',
+        [result.insertId, target_grade, target_class, target_class]
+      );
+      return result.insertId;
+    });
 
     clearResponseCaches({ assignments: true, notifications: true });
     res.json({ assignment_id: assignmentId, success: true });
@@ -1812,6 +1816,7 @@ app.put('/api/assignments/:id', authMiddleware, assignmentWriteRateLimit, async 
     if (content !== undefined) {
       const normalizedContent = content === null ? null : String(content).trim();
       if (normalizedContent && normalizedContent.length > MAX_ASSIGNMENT_CONTENT_LENGTH) return res.status(400).json({ error: getAssignmentContentErrorMessage() });
+      if (!await validateAssignmentImageReferences(normalizedContent, user)) return res.status(403).json({ error: '사용할 수 없는 첨부 이미지가 포함되어 있습니다.' });
       updates.push('content = ?');
       values.push(normalizedContent);
     }
@@ -1840,25 +1845,30 @@ app.put('/api/assignments/:id', authMiddleware, assignmentWriteRateLimit, async 
     }
     if (updates.length === 0) return res.status(400).json({ error: '수정할 내용이 없습니다.' });
     values.push(req.params.id);
-    await pool.execute(`UPDATE assignments SET ${updates.join(', ')} WHERE assignment_id = ?`, values);
-
-    if (nextTargetGrade !== currentAssignment.target_grade || nextTargetClass !== currentAssignment.target_class) {
-      await pool.execute('DELETE FROM user_assignments WHERE assignment_id = ?', [req.params.id]);
-      const [students] = await pool.execute(
-        'SELECT user_id FROM users WHERE grade = ? AND class_number = ?',
-        [nextTargetGrade, nextTargetClass]
+    await withTransaction(async (connection) => {
+      // Lock the current scope: another admin may have retargeted after the initial read.
+      const [lockedRows] = await connection.execute(
+        'SELECT target_grade, target_class FROM assignments WHERE assignment_id = ? FOR UPDATE',
+        [req.params.id]
       );
-      for (const student of students) {
-        await pool.execute(
-          'INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, 0)',
-          [student.user_id, req.params.id]
+      if (!lockedRows.length) throw Object.assign(new Error('assignment-not-found'), { status: 404 });
+      const lockedAssignment = lockedRows[0];
+      const effectiveGrade = isAdminUser(user) && req.body.target_grade !== undefined ? nextTargetGrade : lockedAssignment.target_grade;
+      const effectiveClass = isAdminUser(user) && req.body.target_class !== undefined ? nextTargetClass : lockedAssignment.target_class;
+      await connection.execute(`UPDATE assignments SET ${updates.join(', ')} WHERE assignment_id = ?`, values);
+      if (effectiveGrade !== lockedAssignment.target_grade || effectiveClass !== lockedAssignment.target_class) {
+        await connection.execute('DELETE FROM user_assignments WHERE assignment_id = ?', [req.params.id]);
+        await connection.execute(
+          'INSERT IGNORE INTO user_assignments (user_id, assignment_id, is_completed) SELECT user_id, ?, 0 FROM users WHERE grade = ? AND (? IS NULL OR class_number = ?)',
+          [req.params.id, effectiveGrade, effectiveClass, effectiveClass]
         );
       }
-    }
+    });
 
     clearResponseCaches({ assignments: true, notifications: true });
     res.json({ success: true });
   } catch (error) {
+    if (error?.status === 404) return res.status(404).json({ error: '과제를 찾을 수 없습니다.' });
     logApiError('PUT /api/assignments/:id failed', error, { assignmentId: req.params.id, actorUserId: req.user?.id });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -1937,16 +1947,27 @@ app.put('/api/user-assignments', authMiddleware, async (req, res) => {
     const user = await getCurrentUser(req.user.id);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     if (isAdminUser(user)) return res.status(403).json({ error: '관리자 계정은 완료 처리를 할 수 없습니다.' });
-    const [allowedRows] = await pool.execute(
-      'SELECT assignment_id FROM assignments WHERE assignment_id = ? AND target_grade = ? AND (target_class = ? OR target_class IS NULL) LIMIT 1',
-      [assignmentId, user.grade, user.class_number]
-    );
-    if (allowedRows.length === 0) return res.status(403).json({ error: '권한이 없습니다.' });
+    if (![true, false, 0, 1, '0', '1'].includes(req.body.is_completed)) {
+      return res.status(400).json({ error: '완료 상태가 올바르지 않습니다.' });
+    }
     const isCompleted = normalizeBooleanFlag(req.body.is_completed);
-    await pool.execute(
-      'INSERT INTO user_assignments (user_id, assignment_id, is_completed) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_completed = ?',
-      [req.user.id, assignmentId, isCompleted, isCompleted]
+    // Check visibility within the write itself, so a concurrent retarget cannot bypass it.
+    const [result] = await pool.execute(
+      `INSERT INTO user_assignments (user_id, assignment_id, is_completed)
+       SELECT ?, assignment_id, ? FROM assignments
+       WHERE assignment_id = ? AND target_grade = ? AND (target_class = ? OR target_class IS NULL)
+       ON DUPLICATE KEY UPDATE is_completed = ?`,
+      [req.user.id, isCompleted, assignmentId, user.grade, user.class_number, isCompleted]
     );
+    if (!result.affectedRows) {
+      const [rows] = await pool.execute(
+        'SELECT assignment_id FROM assignments WHERE assignment_id = ? AND target_grade = ? AND (target_class = ? OR target_class IS NULL) LIMIT 1',
+        [assignmentId, user.grade, user.class_number]
+      );
+      if (!rows.length) return res.status(403).json({ error: '권한이 없습니다.' });
+    }
+
+    clearResponseCaches({ notifications: true });
     res.json({ success: true });
   } catch {
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
@@ -2049,14 +2070,8 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     messageSql += ` ORDER BY m.created_at DESC LIMIT ${limit}`;
 
     const [assignmentResult, messageResult] = await Promise.all([
-      pool.execute(assignmentSql, assignmentParams).catch((error) => {
-        logApiError('GET /api/notifications assignments query failed', error, { userId: currentUser.user_id });
-        return [[]];
-      }),
-      pool.execute(messageSql, messageParams).catch((error) => {
-        logApiError('GET /api/notifications messages query failed', error, { userId: currentUser.user_id });
-        return [[]];
-      })
+      pool.execute(assignmentSql, assignmentParams),
+      pool.execute(messageSql, messageParams)
     ]);
     const assignmentRows = Array.isArray(assignmentResult?.[0]) ? assignmentResult[0] : [];
     const messageRows = Array.isArray(messageResult?.[0]) ? messageResult[0] : [];
@@ -2088,11 +2103,11 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     res.json(setCachedResponse(notificationCache, cacheKey, items));
   } catch (error) {
     logApiError('GET /api/notifications failed', error, { userId: req.user?.id });
-    res.json([]);
+    res.status(503).json({ error: '알림을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' });
   }
 });
 
-app.post('/api/messages', authMiddleware, async (req, res) => {
+app.post('/api/messages', authMiddleware, assignmentWriteRateLimit, async (req, res) => {
   try {
     const content = String(req.body.content || '').trim();
     const type = String(req.body.type || '');
@@ -2117,12 +2132,12 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     clearResponseCaches({ messages: true, notifications: true });
     res.json({ message_id: result.insertId, success: true });
   } catch (error) {
-    logApiError('POST /api/messages failed', error, { actorUserId: req.user?.id, body: req.body });
+    logApiError('POST /api/messages failed', error, { actorUserId: req.user?.id });
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });
 
-app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
+app.delete('/api/messages/:id', authMiddleware, assignmentWriteRateLimit, async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT sender_id FROM messages WHERE message_id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: '메세지를 찾을 수 없습니다.' });
@@ -2138,115 +2153,131 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
-  try {
-    if (!gemini) {
-      return res.status(503).json({ success: false, error: 'AI 챗봇이 아직 설정되지 않았습니다. 관리자에게 문의해주세요.' });
-    }
-
-    const currentUser = await getCurrentUser(req.user.id);
-    if (!currentUser) {
-      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    }
-
-    const rawMessage = String(req.body.message || '').trim();
-    if (!rawMessage) return res.status(400).json({ error: '질문을 입력해주세요.' });
-    if (rawMessage.length > CHATBOT_MAX_MESSAGE_LENGTH) {
-      return res.status(400).json({ error: `질문은 ${CHATBOT_MAX_MESSAGE_LENGTH}자 이하로 입력해주세요.` });
-    }
-
-    const history = normalizeChatHistory(req.body.history);
-    const cacheKey = getChatbotResponseCacheKey(currentUser.user_id, rawMessage, history);
-    const cachedReply = getCachedChatbotResponse(cacheKey);
-    if (cachedReply) {
-      return res.json({
-        success: true,
-        reply: cachedReply
-      });
-    }
-
-    const chatbotContext = await buildChatbotContext(currentUser);
-    const messages = [
-      {
-        role: 'system',
-        content: [
-          '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다.',
-          '항상 한국어로 답하고, 짧고 실용적으로 설명한다.',
-          '학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.',
-          '아래 컨텍스트에는 사용자의 학년/반과 과제 요약만 포함되어 있다.',
-          '사용자 이름, 작성자 이름, 다른 학생 정보, 공지 원문 같은 민감한 정보는 모른다고 전제한다.',
-          '과제 본문은 요약본만 전달되므로 세부 지시가 더 필요하면 사용자에게 해당 부분만 직접 보내달라고 안내한다.',
-          '제공된 과제 요약 범위를 넘는 정보는 추측하지 않는다.',
-          '',
-          chatbotContext
-        ].join('\n')
-      },
-      ...history,
-      {
-        role: 'user',
-        content: rawMessage
-      }
-    ];
-    const response = await requestChatbotCompletion(messages);
-
-    const reply = String(response.choices?.[0]?.message?.content || '').trim();
-    if (!reply) {
-      return res.status(502).json({ error: '챗봇 응답이 비어 있습니다. 잠시 후 다시 시도해주세요.' });
-    }
-
-    setCachedChatbotResponse(cacheKey, reply);
-    res.json({
-      success: true,
-      reply
-    });
-  } catch (error) {
-    logApiError('POST /api/chatbot failed', error, { userId: req.user?.id });
-    if (error?.status === 401 || error?.status === 403) {
-      return res.status(502).json({ success: false, error: 'AI 챗봇 설정에 문제가 있습니다. 관리자에게 문의해주세요.' });
-    }
-    if (error?.status === 429) {
-      return res.status(503).json({ success: false, error: 'AI 사용량 한도에 잠시 걸렸습니다. 1~2분 후 다시 시도해주세요.' });
-    }
-    if (isChatbotTransientError(error)) {
-      return res.status(503).json({ success: false, error: 'AI 서버 연결이 잠시 불안정합니다. 잠시 후 다시 시도해주세요.' });
-    }
-    res.json({
-      success: false,
-      error: '챗봇 응답을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'
-    });
-  }
-});
-
+// AI 챗봇 보관: 현재 실행하지 않습니다. 재활성화 전 인증/비용/개인정보를 다시 검토하세요.
+// app.post('/api/chatbot', authMiddleware, chatbotRateLimit, async (req, res) => {
+//   try {
+//     if (!gemini) {
+//       return res.status(503).json({ success: false, error: 'AI 챗봇이 아직 설정되지 않았습니다. 관리자에게 문의해주세요.' });
+//     }
+//
+//     const currentUser = await getCurrentUser(req.user.id);
+//     if (!currentUser) {
+//       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+//     }
+//
+//     const rawMessage = String(req.body.message || '').trim();
+//     if (!rawMessage) return res.status(400).json({ error: '질문을 입력해주세요.' });
+//     if (rawMessage.length > CHATBOT_MAX_MESSAGE_LENGTH) {
+//       return res.status(400).json({ error: `질문은 ${CHATBOT_MAX_MESSAGE_LENGTH}자 이하로 입력해주세요.` });
+//     }
+//
+//     const history = normalizeChatHistory(req.body.history);
+//     const cacheKey = getChatbotResponseCacheKey(currentUser.user_id, rawMessage, history);
+//     const cachedReply = getCachedChatbotResponse(cacheKey);
+//     if (cachedReply) {
+//       return res.json({
+//         success: true,
+//         reply: cachedReply
+//       });
+//     }
+//
+//     const chatbotContext = await buildChatbotContext(currentUser);
+//     const messages = [
+//       {
+//         role: 'system',
+//         content: [
+//           '너는 "과제 알리미" 서비스 안에서 동작하는 한국어 챗봇이다.',
+//           '항상 한국어로 답하고, 짧고 실용적으로 설명한다.',
+//           '학교 과제 관리와 학습 계획에 도움이 되는 방향으로 답한다.',
+//           '아래 컨텍스트에는 사용자의 학년/반과 과제 요약만 포함되어 있다.',
+//           '사용자 이름, 작성자 이름, 다른 학생 정보, 공지 원문 같은 민감한 정보는 모른다고 전제한다.',
+//           '과제 본문은 요약본만 전달되므로 세부 지시가 더 필요하면 사용자에게 해당 부분만 직접 보내달라고 안내한다.',
+//           '제공된 과제 요약 범위를 넘는 정보는 추측하지 않는다.',
+//           '',
+//           chatbotContext
+//         ].join('\n')
+//       },
+//       ...history,
+//       {
+//         role: 'user',
+//         content: rawMessage
+//       }
+//     ];
+//     const response = await requestChatbotCompletion(messages);
+//
+//     const reply = String(response.choices?.[0]?.message?.content || '').trim();
+//     if (!reply) {
+//       return res.status(502).json({ error: '챗봇 응답이 비어 있습니다. 잠시 후 다시 시도해주세요.' });
+//     }
+//
+//     setCachedChatbotResponse(cacheKey, reply);
+//     res.json({
+//       success: true,
+//       reply
+//     });
+//   } catch (error) {
+//     logApiError('POST /api/chatbot failed', error, { userId: req.user?.id });
+//     if (error?.status === 401 || error?.status === 403) {
+//       return res.status(502).json({ success: false, error: 'AI 챗봇 설정에 문제가 있습니다. 관리자에게 문의해주세요.' });
+//     }
+//     if (error?.status === 429) {
+//       return res.status(503).json({ success: false, error: 'AI 사용량 한도에 잠시 걸렸습니다. 1~2분 후 다시 시도해주세요.' });
+//     }
+//     if (isChatbotTransientError(error)) {
+//       return res.status(503).json({ success: false, error: 'AI 서버 연결이 잠시 불안정합니다. 잠시 후 다시 시도해주세요.' });
+//     }
+//     res.json({
+//       success: false,
+//       error: '챗봇 응답을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'
+//     });
+//   }
+// });
+//
 // Serve frontend
 app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'API를 찾을 수 없습니다.' });
   res.sendFile(path.join(__dirname, 'src', 'login.html'));
+});
+
+// Always return JSON errors for malformed/oversized API payloads, without internals.
+app.use((error, req, res, _next) => {
+  if (res.headersSent) return _next(error);
+  const status = error?.type === 'entity.too.large' ? 413
+    : error instanceof SyntaxError && error?.type === 'entity.parse.failed' ? 400
+    : error?.status === 404 || error?.code === 'ENOENT' ? 404 : 500;
+  if (status >= 500) logApiError('Unhandled request error', error);
+  const message = status === 413 ? '요청 데이터가 너무 큽니다.' : status === 400 ? '요청 형식이 올바르지 않습니다.'
+    : status === 404 ? '요청한 파일을 찾을 수 없습니다.' : '서버 오류가 발생했습니다.';
+  res.status(status).json({ error: message });
 });
 
 async function init() {
   let retries = 30;
   while (retries > 0) {
+    let conn;
     try {
-      await fs.mkdir(ASSIGNMENT_IMAGE_DIR, { recursive: true });
-      const conn = await pool.getConnection();
+      if (ASSIGNMENT_IMAGES_ENABLED) await fs.mkdir(ASSIGNMENT_IMAGE_DIR, { recursive: true });
+      conn = await pool.getConnection();
       await conn.ping();
-        for (const statement of bootstrapSchema) {
-          await conn.execute(statement);
-        }
-        await migrateSchema(conn);
-        await cleanupOrphanedRecords(conn);
-        await seedAdminAccount(conn);
-        conn.release();
-      console.log(`MySQL connected: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
-      app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-      return;
-    } catch {
-      retries--;
-      console.log(`Waiting for MySQL... (${retries} retries left)`);
-      await new Promise(r => setTimeout(r, 2000));
+      for (const statement of bootstrapSchema) await conn.execute(statement);
+      await migrateSchema(conn);
+      await cleanupOrphanedRecords(conn);
+      await seedAdminAccount(conn);
+      console.log('MySQL connected');
+      return app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    } catch (error) {
+      retries -= 1;
+      logApiError(`Waiting for MySQL (${retries} retries left)`, error);
+      if (retries > 0) await new Promise((resolve) => setTimeout(resolve, 2000));
+    } finally {
+      if (conn) conn.release();
     }
   }
-  console.error('Failed to connect to MySQL');
-  process.exit(1);
+  console.error('Failed to initialize MySQL');
+  process.exitCode = 1;
+  await pool.end();
+  return null;
 }
 
-init();
+if (require.main === module) init();
+module.exports = { app, pool, init };

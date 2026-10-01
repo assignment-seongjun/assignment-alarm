@@ -5,22 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 설정</title>
   <script src="js/theme-init.js?v=1"></script>
-  <link rel="stylesheet" href="css/style.css?v=27">
+  <link rel="stylesheet" href="css/style.css?v=28">
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">본문으로 이동</a>
   <div class="app-shell">
   <header class="app-header">
-    <h1 data-nav="calendar.html">과제 알리미</h1>
-    <nav>
-      <a href="calendar.html">날짜화면</a>
-      <a href="register.html">과제등록</a>
-      <a href="messages.html">메세지</a>
-      <a href="chatbot.html">AI 챗봇</a>
-      <a href="settings.html" class="active">설정</a>
+    <a class="brand" href="calendar.html" aria-label="과제 알리미 홈"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="14" height="15" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="M8 3.5v3M16 3.5v3M5 10h14M9 14l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>과제 알리미</span></a>
+    <nav aria-label="주요 메뉴">
+      <a href="calendar.html">대시보드</a>
+      <a href="register.html">과제 등록</a>
+      <a href="messages.html">공지사항</a>
+      <!-- AI 챗봇 메뉴는 재도입 전까지 비활성화합니다. <a href="chatbot.html">AI 챗봇</a> -->
+      <a href="settings.html" class="active" aria-current="page">설정</a>
     </nav>
     <div class="user-info">
       <div class="notification-area">
-        <button class="notification-btn" id="notificationBtn" type="button">알림 <span class="notification-badge" id="notificationBadge">0</span></button>
+        <button class="notification-btn" id="notificationBtn" type="button" aria-expanded="false" aria-controls="notificationPanel">알림 <span class="notification-badge" id="notificationBadge">0</span></button>
         <div class="notification-panel" id="notificationPanel">
           <div class="notification-panel-header">
             <strong>최근 알림</strong>
@@ -36,7 +37,8 @@
     </div>
   </header>
 
-  <div class="container">
+  <main class="container" id="mainContent">
+    <div class="page-heading"><div><p class="eyebrow">MY ACCOUNT</p><h1>나에게 맞는 알리미</h1><p class="page-description">프로필을 확인하고 알림과 화면을 설정하세요.</p></div></div>
     <div class="card">
       <div class="settings-section">
         <h3>프로필</h3>
@@ -44,12 +46,12 @@
           <div class="profile-avatar" id="profileAvatar">?</div>
           <div style="flex:1">
               <div class="form-group">
-                <label>이름</label>
-                <input type="text" id="settingName" class="readonly-input" placeholder="이름" disabled>
+                <label for="settingName">이름</label>
+          <input type="text" id="settingName" class="readonly-input" placeholder="이름" disabled>
               </div>
             <div class="form-group">
-              <label>소속</label>
-              <input type="text" id="settingClass" class="readonly-input" disabled>
+              <label for="settingClass">소속</label>
+          <input type="text" id="settingClass" class="readonly-input" disabled>
             </div>
           </div>
         </div>
@@ -59,8 +61,8 @@
       <div class="settings-section">
         <h3>알림 설정</h3>
         <div class="toggle-row">
-          <label>과제 알림</label>
-          <div class="toggle on" id="alarmToggle"></div>
+          <label for="alarmToggle">과제 알림</label>
+          <button type="button" class="toggle on" id="alarmToggle" role="switch" aria-checked="true" aria-label="과제 알림 사용"></button>
         </div>
         <p class="settings-help-text">새 과제 등록 및 마감일 알림을 받습니다.</p>
       </div>
@@ -84,7 +86,7 @@
       </div>
 
       <div class="settings-section admin-section" id="adminAssignmentSection" style="display:none">
-        <button class="admin-accordion-toggle open" type="button" data-target="adminAssignmentPanel">
+        <button class="admin-accordion-toggle open" type="button" data-target="adminAssignmentPanel" aria-controls="adminAssignmentPanel" aria-expanded="true">
           <span>과제 관리</span>
           <span class="admin-accordion-arrow">▾</span>
         </button>
@@ -92,8 +94,8 @@
           <p class="admin-section-help">학년/반별 과제를 드롭다운으로 골라 확인하고 삭제할 수 있습니다.</p>
           <div class="admin-filter-bar show admin-panel-filter">
             <strong>과제 범위</strong>
-            <select id="adminSettingsAssignmentGrade"></select>
-            <select id="adminSettingsAssignmentClass"></select>
+            <select aria-label="과제 조회 학년" id="adminSettingsAssignmentGrade"></select>
+            <select aria-label="과제 조회 반" id="adminSettingsAssignmentClass"></select>
           </div>
           <div id="adminAssignmentList"></div>
           <div class="admin-pagination" id="adminAssignmentPager"></div>
@@ -101,20 +103,20 @@
       </div>
 
       <div class="settings-section admin-section" id="adminMessageSection" style="display:none">
-        <button class="admin-accordion-toggle" type="button" data-target="adminMessagePanel">
-          <span>메세지 관리</span>
+        <button class="admin-accordion-toggle" type="button" data-target="adminMessagePanel" aria-controls="adminMessagePanel" aria-expanded="false">
+          <span>공지 관리</span>
           <span class="admin-accordion-arrow">▾</span>
         </button>
         <div class="admin-accordion-panel" id="adminMessagePanel">
           <p class="admin-section-help">학년 공지와 반 공지를 나눠서 보고 삭제할 수 있습니다.</p>
           <div class="admin-filter-bar show admin-panel-filter">
             <strong>공지 범위</strong>
-            <select id="adminSettingsMessageType">
+            <select aria-label="공지 조회 종류" id="adminSettingsMessageType">
               <option value="grade">학년 공지</option>
               <option value="class">반 공지</option>
             </select>
-            <select id="adminSettingsMessageGrade"></select>
-            <select id="adminSettingsMessageClass"></select>
+            <select aria-label="공지 조회 학년" id="adminSettingsMessageGrade"></select>
+            <select aria-label="공지 조회 반" id="adminSettingsMessageClass"></select>
           </div>
           <div id="adminMessageList"></div>
           <div class="admin-pagination" id="adminMessagePager"></div>
@@ -122,8 +124,8 @@
       </div>
 
       <div class="settings-section admin-section" id="adminUserSection" style="display:none">
-        <button class="admin-accordion-toggle" type="button" data-target="adminUserPanel">
-          <span>유저 관리</span>
+        <button class="admin-accordion-toggle" type="button" data-target="adminUserPanel" aria-controls="adminUserPanel" aria-expanded="false">
+          <span>사용자 관리</span>
           <span class="admin-accordion-arrow">▾</span>
         </button>
           <div class="admin-accordion-panel" id="adminUserPanel">
@@ -133,11 +135,11 @@
         </div>
       </div>
     </div>
-  </div>
+  </main>
   </div>
 
     <script src="js/api.js?v=16"></script>
-  <script src="js/app-shell.js?v=1"></script>
-    <script src="js/settings.js?v=3"></script>
+  <script src="js/app-shell.js?v=2"></script>
+    <script src="js/settings.js?v=4"></script>
 </body>
 </html>

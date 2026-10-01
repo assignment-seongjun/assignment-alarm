@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>과제 알리미 - 로그인</title>
   <script src="js/theme-init.js?v=1"></script>
-  <link rel="stylesheet" href="css/style.css?v=27">
+  <link rel="stylesheet" href="css/style.css?v=28">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="login-page">
   <div class="app-shell">
   <div class="auth-page">
-    <div class="auth-box">
-      <h1>과제 알리미</h1>
-      <p>구글 학교 계정으로 로그인하세요.</p>
+    <section class="auth-intro"><a class="brand" href="login.html"><span class="brand-mark" aria-hidden="true">✓</span><span>과제 알리미</span></a><p class="eyebrow">A LITTLE MORE ORGANIZED</p><h2>과제는 잊지 않고,<br>학교생활은 가볍게.</h2><p class="auth-intro-description">우리 반 과제와 공지를 한곳에서.<br>해야 할 일과 끝낸 일을 차근차근 관리하세요.</p><div class="auth-preview" aria-hidden="true"><div class="preview-top"><span>MY ASSIGNMENTS</span><span>이번 주</span></div><div class="preview-task"><span class="preview-check completed">✓</span><div><strong>끝낸 과제는 체크하고</strong><small>제출 완료</small></div><span class="preview-dot"></span></div><div class="preview-task"><span class="preview-check"></span><div><strong>다가오는 마감은 확인하고</strong><small>우리 반 캘린더</small></div><span class="preview-pill">D–2</span></div><div class="preview-task"><span class="preview-check"></span><div><strong>중요한 소식은 함께 나눠요</strong><small>학년 · 반 공지</small></div><span class="preview-dot"></span></div></div><p class="auth-intro-foot">계획부터 제출까지, 한눈에.</p></section><div class="auth-box">
+      <p class="eyebrow">WELCOME BACK</p><h1>반가워요!</h1>
+      <p>학교 Google 계정으로 시작하세요.</p><div class="login-status" id="loginStatus" role="status">로그인 준비 중입니다…</div>
 
-      <div class="auth-error" id="authError"></div>
+      <div class="auth-error" id="authError" role="alert"></div>
 
       <div id="loginForm">
         <div class="auth-divider" id="googleDivider" style="display:none"><span>Google</span></div>
@@ -25,27 +25,27 @@
         </div>
       </div>
 
-      <div id="googleProfileForm" style="display:none">
+      <form id="googleProfileForm" style="display:none">
         <div class="form-group">
-          <label>이름</label>
+          <label for="googleProfileName">이름</label>
           <input type="text" id="googleProfileName" readonly>
         </div>
         <div class="form-group">
-          <label>이메일</label>
+          <label for="googleProfileEmail">이메일</label>
           <input type="text" id="googleProfileEmail" readonly>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>학년</label>
-            <select id="googleGrade">
+            <label for="googleGrade">학년</label>
+          <select id="googleGrade">
               <option value="1">1학년</option>
               <option value="2">2학년</option>
               <option value="3">3학년</option>
             </select>
           </div>
           <div class="form-group">
-            <label>반</label>
-            <select id="googleClass">
+            <label for="googleClass">반</label>
+          <select id="googleClass">
               <option value="1">1반</option>
               <option value="2">2반</option>
               <option value="3">3반</option>
@@ -53,14 +53,15 @@
             </select>
           </div>
         </div>
-        <button class="btn btn-primary" style="width:100%" id="googleProfileBtn">시작하기</button>
-        <div class="auth-link"><a id="cancelGoogleSetup">다시 로그인 선택으로 돌아가기</a></div>
-      </div>
+        <button class="btn btn-primary" style="width:100%" id="googleProfileBtn" type="submit">시작하기</button>
+        <div class="auth-link"><button class="text-button" type="button" id="cancelGoogleSetup">다시 로그인 선택으로 돌아가기</button></div>
+      </form>
+      <p class="auth-footnote">학교 계정으로 우리 반의 과제와 공지에 연결됩니다.</p>
     </div>
   </div>
   </div>
 
   <script src="js/api.js?v=16"></script>
-  <script src="js/login.js?v=2"></script>
+  <script src="js/login.js?v=3"></script>
 </body>
 </html>
