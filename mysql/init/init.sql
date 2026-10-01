@@ -1,11 +1,14 @@
 CREATE TABLE IF NOT EXISTS users (
   user_id INT AUTO_INCREMENT PRIMARY KEY,
   password VARCHAR(255) NOT NULL,
-  name VARCHAR(100) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
+  google_sub VARCHAR(255) DEFAULT NULL,
+  google_email VARCHAR(255) DEFAULT NULL,
   grade INT NOT NULL,
   class_number INT NOT NULL,
   profile_image_url VARCHAR(500) DEFAULT NULL,
   is_alarm_enabled TINYINT(1) DEFAULT 1,
+  is_admin TINYINT(1) DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY users_grade_class_idx (grade, class_number)
 );

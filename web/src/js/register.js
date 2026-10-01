@@ -3,6 +3,10 @@ API.requireAuth();
     let adminClassFilter = 'all';
     let editingAssignmentId = null;
     let isUploadingTaskImage = false;
+    let isSavingAssignment = false;
+    let imagesEnabled = false;
+    let listVersion = 0;
+    let assignmentsCache = [];
 
     async function init() {
       const user = await API.ensureUser();
@@ -14,6 +18,11 @@ API.requireAuth();
       initAdminFilters(user);
       initTargetSelectors(user);
       resetAssignmentForm();
+      const config = await API.publicConfig();
+      imagesEnabled = config?.imagesEnabled === true;
+      document.getElementById('insertImageBtn').hidden = !imagesEnabled;
+      const hint = document.getElementById('imageUploadHint');
+      hint.textContent = imagesEnabled ? '설명이나 참고 링크를 적어주세요. PNG, JPG, WebP, GIF 이미지(개당 4MB 이하)도 추가할 수 있어요.' : '설명이나 참고 링크를 적어주세요. 현재 서버에서는 이미지 업로드를 지원하지 않습니다.';
       await loadMyAssignments();
     }
 
@@ -49,10 +58,10 @@ API.requireAuth();
 
     function getVisibleAssignments(user, data) {
       if (!user.is_admin) {
-        return data ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
+        return Array.isArray(data) ? data.filter(a => Number(a.created_by) === Number(user.id)) : [];
       }
 
-      return (data || []).filter(a => {
+      return (Array.isArray(data) ? data : []).filter(a => {
         const gradeMatch = adminGradeFilter === 'all' || String(a.target_grade) === adminGradeFilter;
         const classMatch = adminClassFilter === 'all' || String(a.target_class) === adminClassFilter;
         return gradeMatch && classMatch;
@@ -94,12 +103,15 @@ API.requireAuth();
     }
 
     async function uploadImagesToContent(files) {
-      if (isUploadingTaskImage) return;
-      const imageFiles = Array.from(files || []).filter(file => file && String(file.type || '').startsWith('image/'));
+      if (isUploadingTaskImage || !imagesEnabled || isSavingAssignment) return;
+      const imageFiles = Array.from(files || []).filter(file => file && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type));
+      if (imageFiles.some(file => file.size > 4 * 1024 * 1024)) { AppUI.toast('이미지는 개당 4MB 이하로 선택해주세요.', true); return; }
       if (imageFiles.length === 0) return;
 
       const contentField = document.getElementById('taskContent');
       isUploadingTaskImage = true;
+      document.getElementById('insertImageBtn').disabled = true;
+      document.getElementById('saveBtn').disabled = true;
 
       try {
         for (const file of imageFiles) {
@@ -113,9 +125,11 @@ API.requireAuth();
           insertTextAtCursor(contentField, `${prefix}${result.markdown}\n`);
         }
       } catch (error) {
-        alert(error?.message || '이미지 업로드에 실패했습니다.');
+        AppUI.toast(error?.message || '이미지 업로드에 실패했습니다.', true);
       } finally {
         isUploadingTaskImage = false;
+        document.getElementById('insertImageBtn').disabled = false;
+        document.getElementById('saveBtn').disabled = false;
       }
     }
 
@@ -126,7 +140,7 @@ API.requireAuth();
       document.getElementById('cancelEditBtn').style.display = 'none';
       document.getElementById('taskTitle').value = '';
       document.getElementById('taskContent').value = '';
-      document.getElementById('taskDate').value = new Date().toISOString().split('T')[0];
+      document.getElementById('taskDate').value = AppUI.localDate();
       document.getElementById('taskImageInput').value = '';
       renderContentPreview();
 
@@ -159,9 +173,18 @@ API.requireAuth();
     async function loadMyAssignments() {
       const user = await API.ensureUser();
       if (!user) return;
-      const data = await API.getAssignments(user.grade, user.class_number);
-      const visibleAssignments = getVisibleAssignments(user, data);
+      const version = ++listVersion;
       const container = document.getElementById('myAssignments');
+      container.setAttribute('aria-busy', 'true');
+      const data = await API.getAssignments();
+      if (version !== listVersion) return;
+      container.setAttribute('aria-busy', 'false');
+      if (!Array.isArray(data)) {
+        container.innerHTML = `<div class="empty-state">${API.escapeHTML(data?.error || '과제를 불러오지 못했습니다.')}<br><button class="btn btn-secondary btn-sm retry-my" type="button">다시 시도</button></div>`;
+        return;
+      }
+      assignmentsCache = data;
+      const visibleAssignments = getVisibleAssignments(user, data);
       if (visibleAssignments.length === 0) {
         container.innerHTML = `<div class="empty-state">${user.is_admin ? '등록된 과제가 없습니다.' : '등록한 과제가 없습니다.'}</div>`;
         return;
@@ -181,40 +204,49 @@ API.requireAuth();
       `).join('');
     }
 
-    document.getElementById('saveBtn').addEventListener('click', async () => {
-      if (isUploadingTaskImage) {
-        alert('이미지 업로드가 끝난 뒤 다시 시도해주세요.');
-        return;
-      }
-
+    document.getElementById('assignmentForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (isSavingAssignment || isUploadingTaskImage) return;
+      const form = event.currentTarget;
+      if (!form.reportValidity()) return;
       const title = document.getElementById('taskTitle').value.trim();
       const content = document.getElementById('taskContent').value.trim();
       const due_date = document.getElementById('taskDate').value;
-
-      if (!title || !due_date) { alert('과제명과 마감일을 입력해주세요.'); return; }
-
+      if (!title || !due_date) { AppUI.toast('과제명과 마감일을 입력해주세요.', true); return; }
       const user = API.getUser();
+      if (!user) return;
       const payload = { title, content: content || null, due_date };
-      if (user && user.is_admin) {
+      if (user.is_admin) {
         payload.target_grade = parseInt(document.getElementById('adminTargetGrade').value, 10);
         payload.target_class = parseInt(document.getElementById('adminTargetClass').value, 10);
       }
-
-      const res = editingAssignmentId
-        ? await API.updateAssignment(editingAssignmentId, payload)
-        : await API.createAssignment(payload);
-      if (res && res.success) {
-        alert(editingAssignmentId ? '과제가 수정되었습니다.' : '과제가 등록되었습니다.');
+      const editingId = editingAssignmentId;
+      const fields = Array.from(form.querySelectorAll('input, textarea, select, button')).filter(field => field.id !== 'saveBtn');
+      const fieldDisabled = fields.map(field => field.disabled);
+      fields.forEach(field => { field.disabled = true; });
+      const button = document.getElementById('saveBtn');
+      isSavingAssignment = true;
+      button.disabled = true;
+      button.textContent = '저장 중…';
+      try {
+        const result = editingId ? await API.updateAssignment(editingId, payload) : await API.createAssignment(payload);
+        if (!result?.success) throw new Error(result?.error || '저장에 실패했습니다. 다시 시도해주세요.');
+        AppUI.toast(editingId ? '과제가 수정되었습니다.' : '새 과제가 등록되었습니다.');
         resetAssignmentForm();
         await loadMyAssignments();
-        await API.refreshNotifications();
-      } else {
-        alert(res?.error || (editingAssignmentId ? '수정에 실패했습니다.' : '등록에 실패했습니다.'));
+        API.refreshNotifications().catch(() => {});
+      } catch (error) {
+        AppUI.toast(error.message || '저장에 실패했습니다. 다시 시도해주세요.', true);
+      } finally {
+        isSavingAssignment = false;
+        fields.forEach((field, index) => { field.disabled = fieldDisabled[index]; });
+        button.disabled = false;
+        button.textContent = editingAssignmentId ? '수정하기' : '등록하기';
       }
     });
 
     document.getElementById('insertImageBtn').addEventListener('click', () => {
-      document.getElementById('taskImageInput').click();
+      if (imagesEnabled) document.getElementById('taskImageInput').click();
     });
 
     document.getElementById('taskImageInput').addEventListener('change', async (event) => {
@@ -223,6 +255,7 @@ API.requireAuth();
     });
 
     document.getElementById('taskContent').addEventListener('paste', async (event) => {
+      if (!imagesEnabled || isSavingAssignment) return;
       const imageFiles = Array.from(event.clipboardData?.items || [])
         .filter(item => item.kind === 'file' && String(item.type || '').startsWith('image/'))
         .map(item => item.getAsFile())
@@ -238,12 +271,13 @@ API.requireAuth();
     });
 
     document.getElementById('myAssignments').addEventListener('click', async (e) => {
+      if (e.target.classList.contains('retry-my')) { await loadMyAssignments(); return; }
+      if (isSavingAssignment || isUploadingTaskImage) return;
       if (e.target.classList.contains('edit-my')) {
         const assignmentId = parseInt(e.target.dataset.id, 10);
         const user = API.getUser();
         if (!user) return;
-        const data = await API.getAssignments();
-        const visibleAssignments = getVisibleAssignments(user, Array.isArray(data) ? data : []);
+        const visibleAssignments = getVisibleAssignments(user, assignmentsCache);
         const targetAssignment = visibleAssignments.find(assignment => Number(assignment.assignment_id) === assignmentId);
         if (!targetAssignment) {
           alert('과제 정보를 찾지 못했습니다.');
@@ -255,8 +289,11 @@ API.requireAuth();
 
       if (e.target.classList.contains('delete-my')) {
         if (!confirm('정말 삭제하시겠습니까?')) return;
-        const res = await API.deleteAssignment(parseInt(e.target.dataset.id));
-        if (!res || !res.success) { alert(res?.error || '삭제에 실패했습니다.'); return; }
+        const button = e.target;
+        if (button.disabled) return;
+        button.disabled = true;
+        const res = await API.deleteAssignment(parseInt(button.dataset.id, 10));
+        if (!res || !res.success) { button.disabled = false; AppUI.toast(res?.error || '삭제에 실패했습니다.', true); return; }
         if (editingAssignmentId === parseInt(e.target.dataset.id, 10)) {
           resetAssignmentForm();
         }
@@ -283,4 +320,4 @@ API.requireAuth();
       await loadMyAssignments();
     });
 
-    init();
+    init().catch(() => AppUI.toast('화면을 불러오지 못했습니다. 다시 시도해주세요.', true));

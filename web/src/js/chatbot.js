@@ -1,3 +1,4 @@
+/* AI 챗봇 원본 보관. 기능을 재도입하기 전까지 실행 및 API 호출을 하지 않습니다.
 const chatbotState = {
   history: [],
   sending: false,
@@ -174,3 +175,5 @@ async function init() {
 }
 
 init();
+
+*/

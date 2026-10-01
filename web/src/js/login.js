@@ -2,6 +2,7 @@ let googleClientId = null;
 let googleSetupToken = null;
 let googleButtonRendered = false;
 let googleSignInInFlight = false;
+let googleLoadAttempts = 0;
 
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -22,6 +23,7 @@ function setGoogleUiBusy(isBusy) {
     profileButton.textContent = isBusy ? '처리 중...' : '시작하기';
   }
   if (cancelButton) {
+    cancelButton.disabled = isBusy;
     cancelButton.style.pointerEvents = isBusy ? 'none' : '';
     cancelButton.style.opacity = isBusy ? '0.6' : '';
   }
@@ -55,6 +57,7 @@ async function finalizeGoogleLogin(user) {
       const el = document.getElementById('authError');
       el.textContent = msg;
       el.style.display = 'block';
+      document.getElementById('loginStatus').hidden = true;
     }
 
     function hideError() {
@@ -95,6 +98,8 @@ async function handleGoogleCredential(credential) {
       return;
     }
     await finalizeGoogleLogin(res.user);
+  } catch {
+    showError('로그인 중 문제가 생겼습니다. 잠시 후 다시 시도해주세요.');
   } finally {
     setGoogleUiBusy(false);
   }
@@ -105,9 +110,11 @@ async function handleGoogleCredential(credential) {
 
       const api = getGoogleApi();
       if (!api) {
+        if (++googleLoadAttempts > 50) { showError('Google 로그인을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침해주세요.'); return; }
         window.setTimeout(renderGoogleLoginIfNeeded, 200);
         return;
       }
+      document.getElementById('loginStatus').hidden = true;
 
       document.getElementById('googleDivider').style.display = 'block';
       document.getElementById('googleLoginBox').style.display = 'block';
@@ -128,7 +135,7 @@ async function handleGoogleCredential(credential) {
         {
           theme: 'outline',
           size: 'large',
-          width: 340,
+          width: Math.min(340, document.getElementById('googleLoginButton').clientWidth || 280),
           text: 'signin_with',
           shape: 'rectangular'
         }
@@ -143,7 +150,7 @@ async function handleGoogleCredential(credential) {
         renderGoogleLoginIfNeeded();
         return;
       }
-      showError('구글 로그인이 아직 설정되지 않았습니다.');
+      showError(config?.error || '구글 로그인이 아직 설정되지 않았습니다.');
     }
 
 document.getElementById('cancelGoogleSetup').addEventListener('click', () => {
@@ -152,12 +159,13 @@ document.getElementById('cancelGoogleSetup').addEventListener('click', () => {
   showLoginForm();
 });
 
-document.getElementById('googleProfileBtn').addEventListener('click', async () => {
+document.getElementById('googleProfileForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
   if (googleSignInInFlight) return;
   hideError();
   if (!googleSetupToken) {
-    showError('구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.');
     showLoginForm();
+    showError('구글 가입 정보가 만료되었습니다. 다시 로그인해주세요.');
     return;
   }
 
@@ -174,6 +182,8 @@ document.getElementById('googleProfileBtn').addEventListener('click', async () =
       return;
     }
     await finalizeGoogleLogin(res.user);
+  } catch {
+    showError('로그인 중 문제가 생겼습니다. 잠시 후 다시 시도해주세요.');
   } finally {
     setGoogleUiBusy(false);
   }
@@ -186,4 +196,4 @@ document.getElementById('googleProfileBtn').addEventListener('click', async () =
       }
     }).catch(() => {});
 
-    loadPublicConfig().catch(() => {});
+    loadPublicConfig().catch(() => showError('로그인 설정을 불러오지 못했습니다. 새로고침해주세요.'));

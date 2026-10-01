@@ -1,212 +1,260 @@
-let currentDate = new Date();
-    let assignments = [];
-    let assignmentsLoading = false;
-    let adminGradeFilter = 'all';
-    let adminClassFilter = 'all';
+const initialToday = new Date();
+let currentDate = new Date(initialToday.getFullYear(), initialToday.getMonth(), 1);
+let assignments = [];
+let assignmentsLoading = false;
+let assignmentsError = false;
+let loadVersion = 0;
+let adminGradeFilter = 'all';
+let adminClassFilter = 'all';
+let taskFilter = 'all';
+let taskSearch = '';
+let modalDate = null;
+let previousFocus = null;
+const isCompleted = (task) => Number(task.is_completed) === 1 || task.is_completed === true;
+const dateString = (date) => AppUI.localDate(date);
 
-    API.requireAuth();
+API.requireAuth();
 
-    async function init() {
-      const cachedUser = API.getUser();
-      if (cachedUser) {
-        API.loadUserInfo();
-        initAdminFilters(cachedUser);
-        renderCalendar(true);
-      }
-
-      const user = await API.ensureUser();
-      if (!user) return;
+async function init() {
+  try {
+    const cachedUser = API.getUser();
+    if (cachedUser) {
       API.loadUserInfo();
-      API.initNotifications().catch(() => {});
-      initAdminFilters(user);
+      initAdminFilters(cachedUser);
       renderCalendar(true);
-      loadAssignments(user).catch(() => {
-        assignmentsLoading = false;
-        renderCalendar(false);
-      });
     }
+    const user = await API.ensureUser();
+    if (!user) return;
+    API.loadUserInfo();
+    API.initNotifications().catch(() => {});
+    initAdminFilters(user);
+    await loadAssignments(user);
+  } catch {
+    assignmentsError = true;
+    assignmentsLoading = false;
+    renderCalendar();
+  }
+}
 
-    async function loadAssignments(user) {
-      assignmentsLoading = true;
-      const data = user.is_admin
-        ? await API.getAssignments()
-        : await API.getUserAssignmentsWithDetails(user.id, user.grade, user.class_number);
-      assignments = Array.isArray(data) ? data : [];
+async function loadAssignments(user = API.getUser()) {
+  if (!user) return;
+  const requestVersion = ++loadVersion;
+  assignmentsLoading = true;
+  assignmentsError = false;
+  renderCalendar();
+  try {
+    const data = user.is_admin
+      ? await API.getAssignments()
+      : await API.getUserAssignmentsWithDetails(user.id);
+    if (requestVersion !== loadVersion) return;
+    if (!Array.isArray(data)) throw new Error(data?.error || 'load-failed');
+    assignments = data;
+  } catch {
+    if (requestVersion === loadVersion) assignmentsError = true;
+  } finally {
+    if (requestVersion === loadVersion) {
       assignmentsLoading = false;
-      renderCalendar(false);
-    }
-
-    function initAdminFilters(user) {
-      if (!user || !user.is_admin) return;
-
-      const wrap = document.getElementById('adminCalendarFilter');
-      const gradeSelect = document.getElementById('adminGradeFilter');
-      const classSelect = document.getElementById('adminClassFilter');
-
-      wrap.classList.add('show');
-      gradeSelect.innerHTML = ['<option value="all">전체 학년</option>']
-        .concat(Array.from({ length: 3 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`))
-        .join('');
-      classSelect.innerHTML = ['<option value="all">전체 반</option>']
-        .concat(Array.from({ length: 4 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`))
-        .join('');
-
-      gradeSelect.value = adminGradeFilter;
-      classSelect.value = adminClassFilter;
-    }
-
-    function getVisibleAssignments() {
-      const user = API.getUser();
-      if (!user || !user.is_admin) return assignments;
-
-      return assignments.filter(a => {
-        const gradeMatch = adminGradeFilter === 'all' || String(a.target_grade) === adminGradeFilter;
-        const classMatch = adminClassFilter === 'all' || String(a.target_class) === adminClassFilter;
-        return gradeMatch && classMatch;
-      });
-    }
-
-    function renderCalendar(forceLoading = assignmentsLoading) {
-      const year = currentDate.getFullYear();
-      const month = currentDate.getMonth();
-      const user = API.getUser();
-      const visibleAssignments = getVisibleAssignments();
-      const loadingBanner = document.getElementById('calendarLoadingBanner');
-
-      document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월`;
-      document.getElementById('classScope').textContent = user && user.is_admin
-        ? `${adminGradeFilter === 'all' ? '전체 학년' : adminGradeFilter + '학년'} / ${adminClassFilter === 'all' ? '전체 반' : adminClassFilter + '반'}`
-        : user && user.grade && user.class_number
-          ? `${user.grade}학년 ${user.class_number}반 과제`
-          : '';
-      if (loadingBanner) {
-        loadingBanner.hidden = !forceLoading;
-      }
-
-      const firstDay = new Date(year, month, 1).getDay();
-      const lastDate = new Date(year, month + 1, 0).getDate();
-      const today = new Date();
-      const urgentThreshold = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
-
-      let html = '';
-      for (let i = 0; i < firstDay; i++) html += '<div class="day empty"></div>';
-
-      for (let d = 1; d <= lastDate; d++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
-        const dayTasks = visibleAssignments.filter(a => a.due_date === dateStr);
-
-        let tags = '';
-        dayTasks.sort((a, b) => a.is_completed === b.is_completed ? 0 : a.is_completed ? 1 : -1).forEach(a => {
-          const cls = a.is_completed
-            ? 'done'
-            : a.due_date <= urgentThreshold
-              ? 'urgent'
-              : 'normal';
-          const label = user && user.is_admin
-            ? `${a.target_grade}학년 ${a.target_class}반 · ${a.title}`
-            : a.title;
-          tags += `<div class="task-tag ${cls} task-item-el" data-id="${a.assignment_id}">${API.escapeHTML(label)}</div>`;
-        });
-
-        html += `<div class="day${isToday ? ' today' : ''}" data-date="${dateStr}">
-          <div class="date">${d}</div>${tags}</div>`;
-      }
-
-      document.getElementById('calendarBody').innerHTML = html;
-      updateStats(visibleAssignments, forceLoading);
-    }
-
-    function updateStats(visibleAssignments, isLoading = false) {
-      if (isLoading) {
-        document.getElementById('urgentCount').textContent = '...';
-        document.getElementById('normalCount').textContent = '...';
-        document.getElementById('doneCount').textContent = '...';
-        return;
-      }
-      const today = new Date();
-      const twoDaysLater = new Date(today.getTime() + 86400000 * 2).toISOString().split('T')[0];
-      const urgent = visibleAssignments.filter(a => !a.is_completed && a.due_date <= twoDaysLater);
-      const normal = visibleAssignments.filter(a => !a.is_completed && a.due_date > twoDaysLater);
-      const done = visibleAssignments.filter(a => a.is_completed);
-      document.getElementById('urgentLabel').textContent = '긴급';
-      document.getElementById('normalLabel').textContent = '진행중';
-      document.getElementById('doneLabel').textContent = '제출함';
-      document.getElementById('urgentCount').textContent = urgent.length;
-      document.getElementById('normalCount').textContent = normal.length;
-      document.getElementById('doneCount').textContent = done.length;
-    }
-
-    document.getElementById('calendarBody').addEventListener('click', async (e) => {
-      const user = API.getUser();
-      const day = e.target.closest('.day');
-      if (day && !day.classList.contains('empty')) {
-        const date = day.dataset.date;
-        const dayTasks = getVisibleAssignments().filter(a => a.due_date === date);
-        if (dayTasks.length === 0) return;
-
-        document.getElementById('modalTitle').textContent = `${date} 과제`;
-        let html = '';
-        dayTasks.forEach(a => {
-          html += `<div class="assignment-item${a.is_completed ? ' done' : ''}">
-            <div class="info">
-              <div class="title">${API.escapeHTML(a.title)}</div>
-              ${a.content ? `<div class="detail">${API.renderTextWithLinks(a.content)}</div>` : ''}
-              <div class="meta">${API.escapeHTML(a.creator_name || '선생님')} · ${user && user.is_admin ? `${a.target_grade}학년 ${a.target_class}반` : a.is_completed ? '☑ 제출함' : '☐ 미제출'}</div>
-            </div>
-            <div class="actions">
-              ${!(user && user.is_admin) ? `<label class="submit-check"><input type="checkbox" class="modal-submit-toggle" data-id="${a.assignment_id}" ${a.is_completed ? 'checked' : ''}> <span>제출함</span></label>` : ''}
-              ${user && (a.created_by === user.id || user.is_admin) ? `<button class="btn btn-danger btn-sm modal-delete" data-id="${a.assignment_id}">삭제</button>` : ''}
-            </div>
-          </div>`;
-        });
-        document.getElementById('taskList').innerHTML = html;
-        document.getElementById('modal').classList.add('show');
-      }
-    });
-
-    document.getElementById('taskList').addEventListener('click', async (e) => {
-      const id = parseInt(e.target.dataset.id);
-      if (!id) return;
-      if (e.target.classList.contains('modal-delete')) {
-        const res = await API.deleteAssignment(id);
-        if (!res || !res.success) return;
-        assignments = assignments.filter(a => a.assignment_id !== id);
-        renderCalendar();
-        await API.refreshNotifications();
-        document.getElementById('modal').classList.remove('show');
-      }
-    });
-
-    document.getElementById('taskList').addEventListener('change', async (e) => {
-      if (!e.target.classList.contains('modal-submit-toggle')) return;
-      const id = parseInt(e.target.dataset.id, 10);
-      if (!id) return;
-      const res = await API.toggleAssignment(id, e.target.checked);
-      if (!res || !res.success) {
-        e.target.checked = !e.target.checked;
-        return;
-      }
-      const task = assignments.find(a => a.assignment_id === id);
-      if (task) task.is_completed = e.target.checked ? 1 : 0;
       renderCalendar();
-    });
+    }
+  }
+}
 
-    document.getElementById('prevMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
-    document.getElementById('nextMonth').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
-    document.getElementById('adminGradeFilter').addEventListener('change', (e) => {
-      adminGradeFilter = e.target.value;
-      if (adminGradeFilter === 'all') {
-        adminClassFilter = 'all';
-        document.getElementById('adminClassFilter').value = 'all';
-      }
-      renderCalendar();
-    });
-    document.getElementById('adminClassFilter').addEventListener('change', (e) => {
-      adminClassFilter = e.target.value;
-      renderCalendar();
-    });
-    document.getElementById('closeModal').addEventListener('click', () => document.getElementById('modal').classList.remove('show'));
-    document.getElementById('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') document.getElementById('modal').classList.remove('show'); });
+function initAdminFilters(user) {
+  if (!user?.is_admin) return;
+  document.getElementById('adminCalendarFilter').classList.add('show');
+  const grade = document.getElementById('adminGradeFilter');
+  const classNumber = document.getElementById('adminClassFilter');
+  grade.innerHTML = '<option value="all">전체 학년</option>' + Array.from({ length: 3 }, (_, i) => `<option value="${i + 1}">${i + 1}학년</option>`).join('');
+  classNumber.innerHTML = '<option value="all">전체 반</option>' + Array.from({ length: 4 }, (_, i) => `<option value="${i + 1}">${i + 1}반</option>`).join('');
+  grade.value = adminGradeFilter;
+  classNumber.value = adminClassFilter;
+}
 
-    init();
+function getVisibleAssignments() {
+  if (!API.getUser()?.is_admin) return assignments;
+  return assignments.filter((task) => (adminGradeFilter === 'all' || String(task.target_grade) === adminGradeFilter) && (adminClassFilter === 'all' || String(task.target_class) === adminClassFilter));
+}
+function getMatchingAssignments() {
+  return getVisibleAssignments().filter((task) => {
+    const stateMatches = taskFilter === 'all' || (taskFilter === 'done' ? isCompleted(task) : !isCompleted(task));
+    return stateMatches && String(task.title || '').toLocaleLowerCase('ko').includes(taskSearch);
+  });
+}
+function urgentDate() {
+  const threshold = new Date();
+  threshold.setDate(threshold.getDate() + 2);
+  return dateString(threshold);
+}
+
+function renderCalendar(forceLoading = assignmentsLoading) {
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const user = API.getUser();
+  const visible = getVisibleAssignments();
+  const matching = getMatchingAssignments();
+  const today = dateString(new Date());
+  const threshold = urgentDate();
+  document.getElementById('monthTitle').textContent = `${year}년 ${month + 1}월`;
+  document.getElementById('classScope').textContent = user?.is_admin
+    ? `${adminGradeFilter === 'all' ? '전체 학년' : adminGradeFilter + '학년'} · ${adminClassFilter === 'all' ? '전체 반' : adminClassFilter + '반'}`
+    : user?.grade && user?.class_number ? `${user.grade}학년 ${user.class_number}반의 과제 캘린더` : '';
+  document.getElementById('calendarLoadingBanner').hidden = !forceLoading;
+  document.getElementById('calendarError').hidden = !assignmentsError;
+  document.getElementById('calendarBody').setAttribute('aria-busy', String(forceLoading));
+  const firstDay = new Date(year, month, 1).getDay();
+  const lastDate = new Date(year, month + 1, 0).getDate();
+  let html = '<div class="day empty" aria-hidden="true"></div>'.repeat(firstDay);
+  for (let d = 1; d <= lastDate; d += 1) {
+    const date = dateString(new Date(year, month, d));
+    const tasks = matching.filter((task) => task.due_date === date).sort((a, b) => Number(isCompleted(a)) - Number(isCompleted(b)));
+    const tags = tasks.slice(0, 2).map((task) => {
+      const cls = isCompleted(task) ? 'done' : task.due_date <= threshold ? 'urgent' : 'normal';
+      const title = user?.is_admin ? `${task.target_grade}학년 ${task.target_class}반 · ${task.title}` : task.title;
+      return `<span class="task-tag ${cls}">${API.escapeHTML(title)}</span>`;
+    }).join('');
+    const label = `${month + 1}월 ${d}일${date === today ? ', 오늘' : ''}, 과제 ${tasks.length}개`;
+    html += `<button type="button" class="day${date === today ? ' today' : ''}" data-date="${date}" aria-label="${label}"${date === today ? ' aria-current="date"' : ''}><span class="date">${d}</span>${tags}${tasks.length > 2 ? `<span class="task-more">+${tasks.length - 2}개 더</span>` : ''}</button>`;
+  }
+  html += '<div class="day empty" aria-hidden="true"></div>'.repeat((7 - (firstDay + lastDate) % 7) % 7);
+  document.getElementById('calendarBody').innerHTML = html;
+  updateOverview(visible, forceLoading);
+}
+
+function updateOverview(visible, loading) {
+  const pending = visible.filter((task) => !isCompleted(task));
+  const completed = visible.length - pending.length;
+  const urgent = pending.filter((task) => task.due_date <= urgentDate()).length;
+  for (const [id, count] of [['urgentCount', urgent], ['normalCount', pending.length - urgent], ['doneCount', completed]]) {
+    document.getElementById(id).textContent = loading ? '—' : count;
+  }
+  document.getElementById('upcomingCount').textContent = loading ? '—' : `${pending.length}개`;
+  const list = document.getElementById('upcomingList');
+  if (loading) list.innerHTML = '<div class="empty-state">과제를 불러오는 중입니다…</div>';
+  else if (assignmentsError && visible.length === 0) list.innerHTML = '<div class="empty-state">잠시 후 다시 시도해주세요.</div>';
+  else if (pending.length === 0) list.innerHTML = `<div class="empty-state">${visible.length ? '모든 과제를 제출했어요!<br>잠깐 쉬어가도 좋아요.' : '아직 등록된 과제가 없어요.<br>새 과제를 등록해보세요.'}</div>`;
+  else {
+    const today = new Date();
+    const todayUTC = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    list.innerHTML = pending.slice().sort((a, b) => a.due_date.localeCompare(b.due_date) || Number(a.assignment_id) - Number(b.assignment_id)).slice(0, 5).map((task) => {
+      const [year, month, day] = task.due_date.split('-').map(Number);
+      const days = Math.round((Date.UTC(year, month - 1, day) - todayUTC) / 86400000);
+      const label = days < 0 ? '기한 지남' : days === 0 ? '오늘' : `D–${days}`;
+      const dateLabel = `${month}월 ${day}일 · ${API.escapeHTML(task.creator_name || '우리 반')}`;
+      return `<button type="button" class="upcoming-item" data-date="${API.escapeHTML(task.due_date)}"><span class="due-chip${days <= 2 ? ' urgent' : ''}">${label}</span><span class="upcoming-info"><span class="upcoming-title">${API.escapeHTML(task.title)}</span><span class="upcoming-date">${dateLabel}</span></span></button>`;
+    }).join('');
+  }
+  const percentage = visible.length ? Math.round(completed / visible.length * 100) : 0;
+  document.getElementById('progressPercent').textContent = loading ? '—' : `${percentage}%`;
+  document.getElementById('progressCount').textContent = loading ? '불러오는 중' : `${completed} / ${visible.length}개 완료`;
+  document.getElementById('progressBar').style.width = `${percentage}%`;
+  document.getElementById('assignmentProgress').setAttribute('aria-valuenow', String(percentage));
+  document.getElementById('progressDescription').textContent = pending.length ? '하나씩 마무리하면 한결 가벼워져요.' : visible.length ? '잘했어요! 모든 과제를 제출했어요.' : '첫 과제를 등록하고 시작해보세요.';
+}
+
+function openModal(date, { allTasks = false, keepFocus = false } = {}) {
+  modalDate = date;
+  if (!keepFocus) previousFocus = document.activeElement;
+  const tasks = (allTasks ? getVisibleAssignments() : getMatchingAssignments()).filter((task) => task.due_date === date);
+  const user = API.getUser();
+  const [year, month, day] = date.split('-').map(Number);
+  document.getElementById('modalTitle').textContent = `${year}년 ${month}월 ${day}일 과제`;
+  document.getElementById('taskList').innerHTML = tasks.length ? tasks.map((task) => `<div class="assignment-item${isCompleted(task) ? ' done' : ''}"><div class="info"><div class="title">${API.escapeHTML(task.title)}</div>${task.content ? `<div class="detail">${API.renderTextWithLinks(task.content)}</div>` : ''}<div class="meta">${API.escapeHTML(task.creator_name || '우리 반')} · ${user?.is_admin ? `${task.target_grade}학년 ${task.target_class}반` : isCompleted(task) ? '제출 완료' : '미제출'}</div></div><div class="actions">${!user?.is_admin ? `<label class="submit-check"><input type="checkbox" class="modal-submit-toggle" data-id="${Number(task.assignment_id)}" ${isCompleted(task) ? 'checked' : ''}><span>제출 완료</span></label>` : ''}${user && (Number(task.created_by) === Number(user.id) || user.is_admin) ? `<button type="button" class="btn btn-danger btn-sm modal-delete" data-id="${Number(task.assignment_id)}">삭제</button>` : ''}</div></div>`).join('') : '<div class="empty-state">이 날짜에 표시할 과제가 없어요.<br>필터를 확인하거나 새 과제를 등록해보세요.</div><a class="btn btn-primary" href="register.html">새 과제 등록</a>';
+  document.getElementById('modal').classList.add('show');
+  document.body.classList.add('modal-open');
+  if (!keepFocus || !document.getElementById('modal').contains(document.activeElement)) document.querySelector('#modal .modal-content').focus();
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+  document.body.classList.remove('modal-open');
+  modalDate = null;
+  if (previousFocus?.isConnected) previousFocus.focus();
+  else document.getElementById('todayMonth').focus();
+}
+
+document.getElementById('calendarBody').addEventListener('click', (event) => {
+  const day = event.target.closest('[data-date]');
+  if (day && !assignmentsLoading) openModal(day.dataset.date);
+});
+document.getElementById('upcomingList').addEventListener('click', (event) => {
+  const item = event.target.closest('[data-date]');
+  if (item) openModal(item.dataset.date, { allTasks: true });
+});
+document.getElementById('taskList').addEventListener('click', async (event) => {
+  const button = event.target.closest('.modal-delete');
+  if (!button || button.disabled) return;
+  const id = Number(button.dataset.id);
+  if (!id || !confirm('이 과제를 삭제할까요? 삭제하면 되돌릴 수 없습니다.')) return;
+  button.disabled = true;
+  try {
+    const result = await API.deleteAssignment(id);
+    if (!result?.success) throw new Error(result?.error || '과제를 삭제하지 못했습니다.');
+    assignments = assignments.filter((task) => Number(task.assignment_id) !== id);
+    renderCalendar();
+    if (modalDate) openModal(modalDate, { allTasks: true, keepFocus: true });
+    AppUI.toast('과제가 삭제되었습니다.');
+    API.refreshNotifications().catch(() => {});
+  } catch (error) {
+    button.disabled = false;
+    AppUI.toast(error.message || '삭제하지 못했습니다. 다시 시도해주세요.', true);
+  }
+});
+document.getElementById('taskList').addEventListener('change', async (event) => {
+  const checkbox = event.target.closest('.modal-submit-toggle');
+  if (!checkbox || checkbox.disabled) return;
+  const id = Number(checkbox.dataset.id);
+  const completed = checkbox.checked;
+  checkbox.disabled = true;
+  try {
+    const result = await API.toggleAssignment(id, completed);
+    if (!result?.success) throw new Error(result?.error || '제출 상태를 저장하지 못했습니다.');
+    const task = assignments.find((item) => Number(item.assignment_id) === id);
+    if (task) task.is_completed = completed ? 1 : 0;
+    renderCalendar();
+    const item = checkbox.closest('.assignment-item');
+    item?.classList.toggle('done', completed);
+    if (item && task) item.querySelector('.meta').textContent = `${task.creator_name || '우리 반'} · ${completed ? '제출 완료' : '미제출'}`;
+    AppUI.toast(completed ? '제출 완료로 표시했어요.' : '미제출로 변경했어요.');
+  } catch (error) {
+    checkbox.checked = !completed;
+    AppUI.toast(error.message || '상태를 저장하지 못했습니다. 다시 시도해주세요.', true);
+  } finally { checkbox.disabled = false; }
+});
+function changeMonth(offset) {
+  currentDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1);
+  renderCalendar();
+}
+document.getElementById('prevMonth').addEventListener('click', () => changeMonth(-1));
+document.getElementById('nextMonth').addEventListener('click', () => changeMonth(1));
+document.getElementById('todayMonth').addEventListener('click', () => {
+  const today = new Date(); currentDate = new Date(today.getFullYear(), today.getMonth(), 1); renderCalendar();
+});
+document.querySelectorAll('[data-task-filter]').forEach((button) => button.addEventListener('click', () => {
+  taskFilter = button.dataset.taskFilter;
+  document.querySelectorAll('[data-task-filter]').forEach((item) => {
+    const selected = item === button;
+    item.classList.toggle('active', selected); item.setAttribute('aria-pressed', String(selected));
+  });
+  renderCalendar();
+}));
+document.getElementById('taskSearch').addEventListener('input', (event) => { taskSearch = event.target.value.trim().toLocaleLowerCase('ko'); renderCalendar(); });
+document.getElementById('adminGradeFilter').addEventListener('change', (event) => {
+  adminGradeFilter = event.target.value;
+  if (adminGradeFilter === 'all') { adminClassFilter = 'all'; document.getElementById('adminClassFilter').value = 'all'; }
+  renderCalendar();
+});
+document.getElementById('adminClassFilter').addEventListener('change', (event) => { adminClassFilter = event.target.value; renderCalendar(); });
+document.getElementById('retryAssignments').addEventListener('click', () => { if (!assignmentsLoading) loadAssignments(); });
+document.getElementById('closeModal').addEventListener('click', closeModal);
+document.getElementById('modal').addEventListener('click', (event) => { if (event.target.id === 'modal') closeModal(); });
+document.addEventListener('keydown', (event) => {
+  const modal = document.getElementById('modal');
+  if (!modal.classList.contains('show')) return;
+  if (event.key === 'Escape') { event.preventDefault(); closeModal(); }
+  if (event.key !== 'Tab') return;
+  const focusable = Array.from(modal.querySelectorAll('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')).filter((element) => element.getClientRects().length);
+  const first = focusable[0]; const last = focusable[focusable.length - 1];
+  if (!first) { event.preventDefault(); return; }
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === modal.querySelector('.modal-content'))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+init();
